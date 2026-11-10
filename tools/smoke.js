@@ -78,6 +78,11 @@ async function layoutCheck(page, label) {
       const fs = parseFloat(getComputedStyle(el).fontSize);
       if (fs < 17) tiny.push(n.textContent.trim().slice(0, 30) + ' ' + fs + 'px');
     }
+    // Текст, не влезающий в свой блок (обрезан или вылез наружу).
+    document.querySelectorAll('#app *').forEach(el => {
+      if (el.closest('svg') || el.tagName === 'TEXTAREA') return;
+      if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0 && getComputedStyle(el).display !== 'inline') wide.push('текст не влез: ' + el.tagName + '.' + el.className + ' ' + el.textContent.trim().slice(0, 20));
+    });
     return { overflow: document.documentElement.scrollWidth - vw, wide: wide.slice(0, 5), small: small.slice(0, 5), tiny: tiny.slice(0, 5) };
   });
   ok(r.overflow <= 0 && r.wide.length === 0, label + ': ничего не вылезает по ширине' + (r.wide.length ? ' ' + JSON.stringify(r.wide) : '') + (r.overflow > 0 ? ' overflow ' + r.overflow : ''));
@@ -406,7 +411,7 @@ async function main() {
     await page.reload();
     await layoutCheck(page, '320 главная');
     await page.screenshot({ path: path.join(OUT, 'w320-home.png') });
-    for (const h of ['#c/salads', '#r/napoleon', '#r/chicken', '#r/holodets', '#menu', '#shop']) {
+    for (const h of ['#c/salads', '#c/hot', '#c/snacks', '#c/sweets', '#r/napoleon', '#r/chicken', '#r/holodets', '#r/eggs', '#r/sharlotka', '#menu', '#shop']) {
       await page.goto(base + h);
       await layoutCheck(page, '320 ' + h);
     }

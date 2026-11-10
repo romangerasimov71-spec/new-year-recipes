@@ -306,7 +306,7 @@
   function nb(t) { return esc(t).replace(/ /g, '\u00a0'); }
   function metaLine(r) {
     var y = r.whole ? wholeText(r, 1) : 'на ' + r.serves + ' ' + plural(r.serves, PORTION);
-    return nb(r.time) + ' · ' + nb(r.level) + ' · ' + nb(y);
+    return nb(r.time) + ' · ' + nb(r.level) + ' · ' + nb(y).replace('\u00a0—\u00a0', '\u00a0— ');
   }
 
   function viewHome() {

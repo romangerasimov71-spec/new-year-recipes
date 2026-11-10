@@ -168,7 +168,7 @@ svg { display: block; }
 .big-btn.primary svg { color: #fff; }
 .big-btn-text { flex: 1 1 auto; min-width: 0; line-height: 1.25; overflow-wrap: break-word; }
 .badge {
-  flex: 0 1 auto; min-width: 0; font-size: 17px; font-weight: 700; text-align: center;
+  flex: none; white-space: nowrap; font-size: 17px; font-weight: 700; text-align: center;
   background: var(--gold-soft); color: #5A3D0A; line-height: 1.2;
   border-radius: 999px; padding: 6px 12px;
 }
@@ -266,8 +266,11 @@ svg { display: block; }
   background: var(--card); border: 2px solid var(--line); border-radius: var(--radius);
   padding: 8px 10px 8px 8px; box-shadow: var(--shadow);
 }
-.mitem-link { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; text-decoration: none; min-height: 64px; }
-.mitem-art { width: 84px; flex: none; border-radius: 10px; overflow: hidden; }
+.mitem { flex-wrap: wrap; }
+.mitem-link { display: flex; align-items: center; gap: 12px; flex: 1 1 190px; min-width: 0; text-decoration: none; min-height: 64px; }
+.mitem .btn-small { margin-left: auto; }
+.mitem-art { width: 72px; flex: none; border-radius: 10px; overflow: hidden; }
+.mitem-title, .rcard-title { overflow-wrap: break-word; hyphens: auto; }
 .mitem-art svg { width: 100%; height: auto; }
 .mitem-body { display: flex; flex-direction: column; min-width: 0; }
 .mitem-title { font-size: 20px; font-weight: 700; line-height: 1.2; }
@@ -373,13 +376,21 @@ svg { display: block; }
   .r-top .facts li { display: flex; }
   .r-top .fact-k { display: inline; min-width: 6.2em; }
 }
+@media (max-height: 640px) and (max-width: 599px) {
+  .hero-art { max-width: 150px; }
+  .hero .lead { display: none; }
+}
 @media (max-width: 360px) {
   body { font-size: 18px; }
+  .big-btn { padding: 10px 12px; gap: 10px; }
+  .badge { padding: 5px 9px; }
   .hdr-title { font-size: 19px; }
   .hdr-back { padding: 0 12px 0 6px; }
   .page-title { font-size: 26px; }
   .big-btn { font-size: 19px; }
-  .rcard-art { width: 96px; }
+  .rcard-art { width: 88px; }
+  .rcard-title { font-size: 20px; }
+  .mitem-title { font-size: 19px; }
   .stepper .round { width: 52px; height: 52px; }
 }
 @media (min-width: 900px) {
