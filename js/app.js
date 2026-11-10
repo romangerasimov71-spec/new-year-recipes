@@ -6,25 +6,53 @@
   var ART = window.NYR_ART;
   var APP_URL = 'https://romangerasimov71-spec.github.io/new-year-recipes/';
   var STORE_KEY = 'nyr.v1';
-  var MIN_PEOPLE = 1, MAX_PEOPLE = 40;
+  var MIN_PEOPLE = 1, MAX_PEOPLE = 40, MAX_WHOLE = 10;
+  var QUICK_GUESTS = [2, 4, 6, 8, 10, 12, 20];
+  var EPS = 1e-6;
 
-  var byId = {};
-  D.RECIPES.forEach(function (r) { byId[r.id] = r; });
-  var catById = {};
-  D.CATEGORIES.forEach(function (c) { catById[c.id] = c; });
+  // Поиск только через Map — никакие «__proto__» и «toString» из сохранения не пролезут.
+  var RECIPES = new Map();
+  D.RECIPES.forEach(function (r) { RECIPES.set(r.id, r); });
+  var CATS = new Map();
+  D.CATEGORIES.forEach(function (c) { CATS.set(c.id, c); });
+  function rec(id) { return typeof id === 'string' ? RECIPES.get(id) : undefined; }
+  function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function dict() { return Object.create(null); }
 
   /* ---------- Сохранение ---------- */
-  var state = { menu: [], guests: 6, bought: {}, steps: {}, portions: {} };
+  var state = { menu: [], guests: 6, bought: dict(), steps: dict(), portions: dict(), fromMenu: dict() };
+
+  function isObj(o) { return !!o && typeof o === 'object' && !Array.isArray(o); }
+  function num(v) { return typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0; }
   function load() {
+    var s;
     try {
       var raw = window.localStorage.getItem(STORE_KEY);
       if (!raw) return;
-      var s = JSON.parse(raw);
-      if (Array.isArray(s.menu)) state.menu = s.menu.filter(function (id) { return byId[id]; });
-      if (typeof s.guests === 'number') state.guests = clamp(Math.round(s.guests), MIN_PEOPLE, MAX_PEOPLE);
-      if (s.bought && typeof s.bought === 'object') state.bought = s.bought;
-      if (s.steps && typeof s.steps === 'object') state.steps = s.steps;
-    } catch (e) { /* без хранилища тоже работаем */ }
+      s = JSON.parse(raw);
+    } catch (e) { return; /* без хранилища тоже работаем */ }
+    if (!isObj(s)) return;
+    if (Array.isArray(s.menu)) {
+      s.menu.forEach(function (id) { if (rec(id) && state.menu.indexOf(id) < 0) state.menu.push(id); });
+    }
+    if (typeof s.guests === 'number' && isFinite(s.guests)) state.guests = clamp(Math.round(s.guests), MIN_PEOPLE, MAX_PEOPLE);
+    if (isObj(s.steps)) {
+      Object.keys(s.steps).forEach(function (id) {
+        var r = rec(id), v = s.steps[id];
+        if (!r || !Array.isArray(v)) return;
+        var arr = [];
+        v.forEach(function (k) { if (typeof k === 'number' && k % 1 === 0 && k >= 0 && k < r.steps.length && arr.indexOf(k) < 0) arr.push(k); });
+        if (arr.length) state.steps[id] = arr;
+      });
+    }
+    if (isObj(s.bought)) {
+      Object.keys(s.bought).forEach(function (name) {
+        var v = s.bought[name];
+        if (!isObj(v) || !own(D.DEPT, name)) return;
+        var b = { mass: num(v.mass), vol: num(v.vol), pcs: num(v.pcs), sp: num(v.sp) };
+        if (b.mass || b.vol || b.pcs || b.sp) state.bought[name] = b;
+      });
+    }
   }
   function save() {
     try {
@@ -48,26 +76,20 @@
   }
   var DISH = ['блюдо', 'блюда', 'блюд'];
   var PORTION = ['порция', 'порции', 'порций'];
-  var GUEST = ['гостя', 'гостей', 'гостей'];
   var RECIPE_W = ['рецепт', 'рецепта', 'рецептов'];
-  var WHOLE_FORMS = { 'торт': ['торт', 'торта', 'тортов'], 'пирог': ['пирог', 'пирога', 'пирогов'] };
   function guestsText(n) { return n + ' ' + (n % 10 === 1 && n % 100 !== 11 ? 'гостя' : 'гостей'); }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function lower(s) { return s.charAt(0).toLowerCase() + s.slice(1); }
 
   /* ---------- Количества ---------- */
-  var EPS = 1e-9;
-  function numStr(x) {
-    // 1.25 -> "1,25", 2 -> "2"
-    var s = (Math.round(x * 100) / 100).toString();
-    return s.replace('.', ',');
-  }
+  function numStr(x) { return (Math.round(x * 100) / 100).toString().replace('.', ','); }
   function halfStr(x) {
-    // 0.5 -> "½", 1.5 -> "1½"
     var whole = Math.floor(x + EPS), frac = x - whole;
     if (frac > 0.25 && frac < 0.75) return (whole ? whole : '') + '½';
     return String(Math.round(x));
   }
   function roundStep(v, mode) {
-    // В рецепте мелочь (ваниль, специи) точнее; в магазине — до 10 г / 50 г.
+    // В рецепте мелочь точнее; в магазине — вверх до 10 г / 50 г.
     var step = mode === 'shop' ? (v < 200 ? 10 : 50) : (v < 20 ? 1 : (v < 200 ? 10 : 50));
     var r = mode === 'shop' ? Math.ceil(v / step - EPS) * step : Math.round(v / step) * step;
     return Math.max(step, r);
@@ -77,48 +99,54 @@
     if (r >= 1000) return numStr(r / 1000) + ' ' + big;
     return r + ' ' + small;
   }
-  function fmtPcs(n, mode) {
-    if (mode === 'shop') return Math.max(1, Math.ceil(n - 0.001)) + ' шт';
-    if (n < 2) return halfStr(Math.max(0.5, Math.round(n * 2) / 2)) + ' шт';
-    return Math.round(n) + ' шт';
+  function half(n) { return Math.round(n * 2) / 2; }
+  function ceilHalf(n) { return Math.ceil(n * 2 - EPS) / 2; }
+
+  // Ложки в рецепте: ч. л. от 6 — в ст. л.
+  function fmtSpoonRecipe(tsp, wasTbsp) {
+    if (wasTbsp || tsp >= 6 - EPS) return halfStr(Math.max(0.5, half(tsp / 3))) + ' ст. л.';
+    return halfStr(Math.max(0.5, half(tsp))) + ' ч. л.';
   }
-  function fmtSpoon(n, unit, mode) {
-    var r = mode === 'shop' ? Math.ceil(n * 2 - 0.001) / 2 : Math.round(n * 2) / 2;
-    return halfStr(Math.max(0.5, r)) + ' ' + unit;
-  }
-  // Одна строка рецепта.
+  // Одна строка рецепта (и текста «Поделиться»).
   function fmtIng(ing, factor) {
     var q = ing.qty * factor;
     switch (ing.unit) {
-      case 'г': return fmtMetric(q, 'recipe', 'г', 'кг');
-      case 'кг': return fmtMetric(q * 1000, 'recipe', 'г', 'кг');
+      case 'кг': q *= 1000; /* falls through */
+      case 'г': return q < 5 - EPS ? 'щепотка' : fmtMetric(q, 'recipe', 'г', 'кг');
+      case 'л': q *= 1000; /* falls through */
       case 'мл': return fmtMetric(q, 'recipe', 'мл', 'л');
-      case 'л': return fmtMetric(q * 1000, 'recipe', 'мл', 'л');
-      case 'шт': return fmtPcs(q, 'recipe');
-      case 'ст. л.': case 'ч. л.': return fmtSpoon(q, ing.unit, 'recipe');
+      case 'шт':
+        if (own(D.PCS_CEIL, ing.name)) return Math.max(1, Math.ceil(q - 0.001)) + ' шт';
+        if (q < 5) return halfStr(Math.max(0.5, half(q))) + ' шт';
+        return Math.round(q) + ' шт';
+      case 'ст. л.': return fmtSpoonRecipe(q * 3, true);
+      case 'ч. л.': return fmtSpoonRecipe(q, false);
       default: return 'по вкусу';
     }
   }
 
-  function menuFactor(r, guests) {
-    if (r.whole) return Math.max(1, Math.ceil(guests / r.serves - EPS));
-    return guests / r.serves;
+  function wholeCount(r, guests) { return Math.max(1, Math.ceil(guests / r.serves - EPS)); }
+  function menuFactor(r, guests) { return r.whole ? wholeCount(r, guests) : guests / r.serves; }
+  function servesText(r) { return r.servesText || String(r.serves); }
+  // «4–5 порций»: форма слова — по последнему числу.
+  function portionsWord(t) { return plural(+String(t).split('–').pop(), PORTION); }
+  function wholeText(r, k) {
+    var t = k === 1 ? servesText(r) : String(k * r.serves);
+    return k + ' ' + plural(k, r.whole) + ' — ' + t + ' ' + portionsWord(t);
   }
 
-  // Список покупок: складываем одинаковые продукты.
-  function buildShopping(menuIds, guests) {
-    var items = {}, order = [];
+  /* ---------- Список покупок ---------- */
+  // Потребность по продукту: масса (г), объём (мл), штуки, ложки (в ч. л.).
+  function emptyVec() { return { mass: 0, vol: 0, pcs: 0, sp: 0, tbsp: true, taste: false }; }
+  function needs(menuIds, guests) {
+    var items = new Map();
     menuIds.forEach(function (id) {
-      var r = byId[id]; if (!r) return;
+      var r = rec(id); if (!r) return;
       var f = menuFactor(r, guests);
       r.ingredients.forEach(function (ing) {
-        if (D.NO_BUY[ing.name]) return;
-        var it = items[ing.name];
-        if (!it) {
-          it = items[ing.name] = { name: ing.name, dept: D.DEPT[ing.name] || 'other',
-            mass: 0, vol: 0, pcs: 0, st: 0, ch: 0, taste: false };
-          order.push(ing.name);
-        }
+        if (own(D.NO_BUY, ing.name)) return;
+        var it = items.get(ing.name);
+        if (!it) { it = emptyVec(); items.set(ing.name, it); }
         var q = ing.qty * f;
         switch (ing.unit) {
           case 'г': it.mass += q; break;
@@ -126,51 +154,120 @@
           case 'мл': it.vol += q; break;
           case 'л': it.vol += q * 1000; break;
           case 'шт': it.pcs += q; break;
-          case 'ст. л.': it.st += q; break;
-          case 'ч. л.': it.ch += q; break;
+          case 'ст. л.': it.sp += q * 3; break;
+          case 'ч. л.': it.sp += q; it.tbsp = false; break;
           default: it.taste = true;
         }
       });
     });
-    return order.map(function (n) {
-      var it = items[n], parts = [];
-      if (it.mass > 0) parts.push(fmtMetric(it.mass, 'shop', 'г', 'кг'));
-      if (it.vol > 0) parts.push(fmtMetric(it.vol, 'shop', 'мл', 'л'));
-      if (it.pcs > 0) parts.push(fmtPcs(it.pcs, 'shop'));
-      if (it.st > 0 && it.ch > 0) {
-        var tsp = it.st * 3 + it.ch;
-        parts.push(tsp >= 3 ? fmtSpoon(tsp / 3, 'ст. л.', 'shop') : fmtSpoon(tsp, 'ч. л.', 'shop'));
-      } else if (it.st > 0) parts.push(fmtSpoon(it.st, 'ст. л.', 'shop'));
-      else if (it.ch > 0) parts.push(fmtSpoon(it.ch, 'ч. л.', 'shop'));
-      if (it.taste) parts.push(parts.length ? 'немного по вкусу' : 'по вкусу');
-      return { name: it.name, dept: it.dept, amount: parts.join(' + ') };
+    return items;
+  }
+  // Сколько реально купить (округлено вверх) — это и запоминаем при галочке.
+  function roundNeed(name, v) {
+    var o = { mass: 0, vol: 0, pcs: 0, sp: 0 };
+    if (v.mass > EPS) o.mass = roundStep(v.mass, 'shop');
+    if (v.vol > EPS) o.vol = roundStep(v.vol, 'shop');
+    if (v.pcs > EPS) {
+      var n = Math.ceil(v.pcs - 0.001);
+      if (own(D.PACK, name)) n = Math.ceil(n / D.PACK[name]) * D.PACK[name];
+      else if (name === 'Чеснок (зубчики)' && n > 10) n = Math.ceil(n / 10) * 10;
+      o.pcs = n;
+    }
+    if (v.sp > EPS) o.sp = Math.ceil(v.sp / 1.5 - EPS) * 1.5;
+    return o;
+  }
+  var HEADS = ['головка', 'головки', 'головок'], CLOVES = ['зубчик', 'зубчика', 'зубчиков'];
+  var PACKS = ['пачка', 'пачки', 'пачек'], TENS = ['десяток', 'десятка', 'десятков'];
+  // Понятная подпись количества для магазина.
+  function fmtShop(name, v) {
+    var parts = [], vol = v.vol, approxVol = false;
+    var tsp = v.sp, tbspMode = v.tbsp !== false || tsp >= 6 - EPS;
+    if (tsp > EPS && own(D.LIQUID, name) && tsp / 3 >= 8 - EPS) { vol += tsp * 5; tsp = 0; approxVol = true; }
+    if (v.mass > EPS) parts.push(fmtMetric(v.mass, 'shop', 'г', 'кг'));
+    if (vol > EPS) parts.push((approxVol ? '≈ ' : '') + fmtMetric(vol, 'shop', 'мл', 'л'));
+    if (v.pcs > EPS) {
+      var n = Math.ceil(v.pcs - 0.001);
+      if (own(D.PACK, name)) { var k = Math.ceil(n / D.PACK[name]); parts.push(k + ' ' + plural(k, PACKS)); }
+      else if (name === 'Чеснок (зубчики)' && n > 10) { var h = Math.ceil(n / 10); parts.push(h + ' ' + plural(h, HEADS) + ' (≈ ' + n + ' ' + plural(n, CLOVES) + ')'); }
+      else if (name === 'Яйца' && n >= 20) { var t = Math.ceil(n / 10); parts.push(n + ' шт (≈ ' + t + ' ' + plural(t, TENS) + ')'); }
+      else parts.push(n + ' шт');
+    }
+    if (tsp > EPS) {
+      if (tbspMode) {
+        var tb = Math.max(0.5, ceilHalf(tsp / 3)), s = halfStr(tb) + ' ст. л.';
+        if (own(D.SPOON_G, name) && tb > 10) s += ' (≈ ' + fmtMetric(tb * D.SPOON_G[name], 'shop', 'г', 'кг') + ')';
+        parts.push(s);
+      } else parts.push(halfStr(Math.max(0.5, ceilHalf(tsp))) + ' ч. л.');
+    }
+    return parts.join(' + ');
+  }
+  function hasQty(v) { return v.mass > EPS || v.vol > EPS || v.pcs > EPS || v.sp > EPS; }
+  function covered(v, b) {
+    return !!b && v.mass <= b.mass + EPS && v.vol <= b.vol + EPS && v.pcs <= b.pcs + EPS && v.sp <= b.sp + EPS;
+  }
+  function deficit(v, b) {
+    return { mass: Math.max(0, v.mass - b.mass), vol: Math.max(0, v.vol - b.vol), pcs: Math.max(0, v.pcs - b.pcs),
+      sp: Math.max(0, v.sp - b.sp), tbsp: v.tbsp };
+  }
+  var collator = typeof Intl !== 'undefined' && Intl.Collator ? new Intl.Collator('ru') : null;
+  function byName(a, b) { return collator ? collator.compare(a.name, b.name) : (a.name < b.name ? -1 : 1); }
+
+  // Готовый список: items — что купить (по отделам, по алфавиту), home — «проверьте дома».
+  function buildShopping(menuIds, guests, bought) {
+    bought = bought || dict();
+    var items = [], home = [];
+    needs(menuIds, guests).forEach(function (v, name) {
+      if (own(D.AT_HOME, name) || !hasQty(v)) { home.push(name); return; }
+      var b = own(bought, name) ? bought[name] : null;
+      var it = { name: name, dept: own(D.DEPT, name) ? D.DEPT[name] : 'other', need: v, amount: fmtShop(name, v),
+        bought: covered(v, b), partial: false };
+      if (b && !it.bought) {
+        it.partial = true;
+        it.got = fmtShop(name, b);
+        it.more = fmtShop(name, deficit(v, b));
+      }
+      items.push(it);
     });
+    items.sort(byName);
+    home.sort(function (a, b) { return byName({ name: a }, { name: b }); });
+    return { items: items, home: home };
+  }
+  // Убрать отметки по продуктам, которых больше нет в списке.
+  function pruneBought() {
+    var names = new Set(buildShopping(state.menu, state.guests).items.map(function (it) { return it.name; }));
+    Object.keys(state.bought).forEach(function (n) { if (!names.has(n)) delete state.bought[n]; });
   }
 
   /* ---------- Значки (всегда рядом с подписью) ---------- */
   var ICON = {
-    back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     share: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3" fill="currentColor"/><circle cx="6" cy="12" r="3" fill="currentColor"/><circle cx="18" cy="19" r="3" fill="currentColor"/><path d="M8.6 10.6 15.4 6.4M8.6 13.4l6.8 4.2" stroke="currentColor" stroke-width="2"/></svg>',
     menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     cart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2.5l2.2 10.5h10.6L20.5 7H7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="9" cy="19" r="1.8" fill="currentColor"/><circle cx="17" cy="19" r="1.8" fill="currentColor"/></svg>',
     plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" fill="currentColor"/></svg>'
+    star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" fill="currentColor"/></svg>',
+    home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7M6 9.5V20h12V9.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>'
   };
 
   /* ---------- Маршруты ---------- */
+  // Терпимы к хвосту: #r/olivier/, #r/olivier?x=1, #R/Olivier.
   function parseRoute(hash) {
-    var h = (hash || '').replace(/^#\/?/, '');
+    var h = String(hash || '').replace(/^#\/?/, '');
+    try { h = decodeURIComponent(h); } catch (e) { /* как есть */ }
+    var qi = h.indexOf('?'), query = qi >= 0 ? h.slice(qi + 1) : '';
+    var path = (qi >= 0 ? h.slice(0, qi) : h).toLowerCase().replace(/\/+$/, '').trim();
+    var q = dict();
+    query.split('&').forEach(function (p) { if (p) { var kv = p.split('='); q[kv[0]] = kv[1] || '1'; } });
     var m;
-    if ((m = /^c\/([\w-]+)$/.exec(h)) && catById[m[1]]) return { name: 'cat', id: m[1] };
-    if ((m = /^r\/([\w-]+)$/.exec(h)) && byId[m[1]]) return { name: 'recipe', id: m[1] };
-    if (h === 'menu') return { name: 'menu' };
-    if (h === 'shop') return { name: 'shop' };
+    if ((m = /^c\/([\w-]+)$/.exec(path)) && CATS.has(m[1])) return { name: 'cat', id: m[1] };
+    if ((m = /^r\/([\w-]+)$/.exec(path)) && RECIPES.has(m[1])) return { name: 'recipe', id: m[1], fromMenu: q.from === 'menu' };
+    if (path === 'menu') return { name: 'menu' };
+    if (path === 'shop') return { name: 'shop' };
     return { name: 'home' };
   }
-  function routeKey(r) { return r.name + (r.id ? '/' + r.id : ''); }
+  function routeKey(r) { return r ? r.name + (r.id ? '/' + r.id : '') + (r.fromMenu ? '?m' : '') : ''; }
   function parentHash(r) {
-    if (r.name === 'recipe') return '#c/' + byId[r.id].cat;
+    if (r.name === 'recipe') return r.fromMenu ? '#menu' : '#c/' + rec(r.id).cat;
     if (r.name === 'shop') return '#menu';
     return '';
   }
@@ -206,10 +303,10 @@
     backBtn.hidden = !showBack;
     document.title = title === 'Новогодний стол' ? 'Новогодний стол: рецепты' : title + ' — Новогодний стол';
   }
-
+  function nb(t) { return esc(t).replace(/ /g, '\u00a0'); }
   function metaLine(r) {
-    var nb = function (t) { return esc(t).replace(/ /g, '\u00a0'); };
-    return nb(r.time) + ' · ' + nb(r.level) + ' · ' + nb('на ' + r.serves + ' ' + plural(r.serves, PORTION));
+    var y = r.whole ? wholeText(r, 1) : 'на ' + r.serves + ' ' + plural(r.serves, PORTION);
+    return nb(r.time) + ' · ' + nb(r.level) + ' · ' + nb(y);
   }
 
   function viewHome() {
@@ -227,20 +324,20 @@
       '<div class="hero-text"><h1>Рецепты к Новому году</h1>' +
       '<p class="lead">Проверенная классика по шагам, меню на праздник и список покупок.</p></div>' +
       '</section>' +
-      '<h2 class="sec-title">Выберите раздел</h2>' +
-      '<nav class="tiles" aria-label="Разделы">' + tiles + '</nav>' +
       '<div class="home-actions">' +
       '<a class="big-btn primary" href="#menu">' + ICON.menu +
       '<span class="big-btn-text">Моё меню на праздник</span>' +
-      '<span class="badge" data-testid="menu-count">' + (n ? n + ' ' + plural(n, DISH) : 'пусто') + '</span></a>' +
+      '<span class="badge" data-testid="menu-count">' + (n ? n + '\u00a0' + plural(n, DISH) : 'пусто') + '</span></a>' +
       '<a class="big-btn" href="#shop">' + ICON.cart +
       '<span class="big-btn-text">Список покупок</span>' +
-      '<span class="badge">' + (n ? 'по ' + n + ' ' + plural(n, ['блюду', 'блюдам', 'блюдам']) : 'пусто') + '</span></a>' +
-      '</div>';
+      '<span class="badge">' + (n ? 'на\u00a0' + guestsText(state.guests).replace(' ', '\u00a0') : 'пусто') + '</span></a>' +
+      '</div>' +
+      '<h2 class="sec-title">Выберите раздел</h2>' +
+      '<nav class="tiles" aria-label="Разделы">' + tiles + '</nav>';
   }
 
   function viewCat(id) {
-    var c = catById[id];
+    var c = CATS.get(id);
     setHeader(c.title, true);
     var list = D.RECIPES.filter(function (r) { return r.cat === id; }).map(function (r) {
       var inMenu = state.menu.indexOf(r.id) >= 0;
@@ -254,7 +351,9 @@
     return '<h1 class="page-title">' + esc(c.title) + '</h1><ul class="rlist">' + list + '</ul>';
   }
 
-  function portionsOf(r) { return state.portions[r.id] || r.serves; }
+  // Для целых блюд — число целых (курица, торт), для остальных — порции.
+  function amountOf(r) { return own(state.portions, r.id) ? state.portions[r.id] : (r.whole ? 1 : r.serves); }
+  function factorOf(r) { var a = amountOf(r); return r.whole ? a : a / r.serves; }
 
   function ingredientList(r, factor) {
     var html = '', lastGroup = null, open = false;
@@ -271,17 +370,20 @@
     return html;
   }
 
-  function menuButton(r) {
+  function menuBlock(r, shareLabel) {
     var inMenu = state.menu.indexOf(r.id) >= 0;
-    return inMenu
-      ? '<button class="btn btn-outline" data-act="menu-toggle" data-id="' + r.id + '">' + ICON.check + 'В меню · Убрать из меню</button>'
-      : '<button class="btn btn-primary" data-act="menu-toggle" data-id="' + r.id + '">' + ICON.plus + 'Добавить в меню</button>';
+    var share = '<button class="btn btn-secondary" data-act="share-recipe" data-id="' + r.id + '">' + ICON.share + shareLabel + '</button>';
+    if (!inMenu) {
+      return '<div class="actions"><button class="btn btn-primary" data-act="menu-add" data-id="' + r.id + '">' + ICON.plus + 'Добавить в меню</button>' + share + '</div>';
+    }
+    return '<div class="actions"><div class="in-menu" role="status">' + ICON.check + 'В вашем меню</div>' + share + '</div>' +
+      '<button class="btn btn-link remove-link" data-act="menu-del" data-id="' + r.id + '">Убрать из меню</button>';
   }
 
   function viewRecipe(id) {
-    var r = byId[id];
+    var r = rec(id);
     setHeader(r.title, true);
-    var p = portionsOf(r), factor = p / r.serves;
+    var a = amountOf(r), factor = factorOf(r);
     var done = state.steps[r.id] || [];
     var steps = r.steps.map(function (s, k) {
       var isDone = done.indexOf(k) >= 0;
@@ -290,43 +392,51 @@
         '<span class="step-text">' + esc(s) + '</span>' +
         '<span class="step-done">' + ICON.check + 'Сделано</span></button></li>';
     }).join('');
-    var wholeNote = r.whole ? '<p class="note">Рецепт на один ' + esc(r.whole) + ' — ' + r.serves + ' ' + plural(r.serves, PORTION) + '.</p>' : '';
-    return '<div class="r-hero">' + ART.dish(r.id) + '</div>' +
+    var max = r.whole ? MAX_WHOLE : MAX_PEOPLE;
+    var label = r.whole ? 'Сколько:' : 'Порций:';
+    var under = r.whole ? '<p class="note strong" data-testid="whole-note">' + esc(wholeText(r, a)) + '</p>' : '';
+    if (state.fromMenu[r.id]) under += '<p class="note from-menu" data-testid="from-menu">' + (r.whole ? 'Хватит ' : 'Количества ') + 'на ' + guestsText(state.guests) + ', как в вашем меню.</p>';
+    var yieldTxt = r.whole ? wholeText(r, 1) : r.serves + ' ' + plural(r.serves, PORTION);
+    return '<div class="r-top"><div class="r-hero">' + ART.dish(r.id) + '</div><div class="r-head">' +
       '<h1 class="page-title">' + esc(r.title) + '</h1>' +
       '<ul class="facts">' +
       '<li><span class="fact-k">Время</span><span class="fact-v">' + esc(r.time) + (r.wait ? ' <span class="wait">' + esc(r.wait) + '</span>' : '') + '</span></li>' +
       '<li><span class="fact-k">Сложность</span><span class="fact-v">' + esc(r.level) + '</span></li>' +
-      '<li><span class="fact-k">Выход</span><span class="fact-v">' + r.serves + ' ' + plural(r.serves, PORTION) + (r.note ? ' (' + esc(r.note) + ')' : '') + '</span></li>' +
-      '</ul>' +
-      '<div class="actions">' + menuButton(r) +
-      '<button class="btn btn-secondary" data-act="share-recipe" data-id="' + r.id + '">' + ICON.share + 'Поделиться</button></div>' +
+      '<li><span class="fact-k">Выход</span><span class="fact-v">' + esc(yieldTxt) + (r.note ? ' (' + esc(r.note) + ')' : '') + '</span></li>' +
+      '</ul></div></div>' +
+      menuBlock(r, 'Поделиться') +
       '<section class="card"><h2>Ингредиенты</h2>' +
-      '<div class="stepper" role="group" aria-label="Количество порций"><span class="stepper-label">Порций:</span>' +
-      '<button class="round" data-act="por-" data-id="' + r.id + '" aria-label="Меньше порций"' + (p <= MIN_PEOPLE ? ' disabled' : '') + '>−</button>' +
-      '<output class="stepper-val" data-testid="portions">' + p + '</output>' +
-      '<button class="round" data-act="por+" data-id="' + r.id + '" aria-label="Больше порций"' + (p >= MAX_PEOPLE ? ' disabled' : '') + '>+</button></div>' +
-      wholeNote + ingredientList(r, factor) + '</section>' +
+      '<div class="stepper" role="group" aria-label="' + (r.whole ? 'Сколько готовить' : 'Количество порций') + '"><span class="stepper-label">' + label + '</span>' +
+      '<button class="round" data-act="por-" data-id="' + r.id + '" aria-label="Меньше"' + (a <= 1 ? ' disabled' : '') + '>−</button>' +
+      '<output class="stepper-val" data-testid="portions">' + a + '</output>' +
+      '<button class="round" data-act="por+" data-id="' + r.id + '" aria-label="Больше"' + (a >= max ? ' disabled' : '') + '>+</button></div>' +
+      under + ingredientList(r, factor) + '</section>' +
       '<section class="card"><h2>Как готовить</h2><p class="hint">Нажмите на шаг, когда сделаете его, — он отметится.</p>' +
       '<ol class="steps">' + steps + '</ol>' +
       (done.length ? '<button class="btn btn-link" data-act="steps-reset" data-id="' + r.id + '">Снять все отметки</button>' : '') +
       '</section>' +
       '<aside class="tip"><span class="tip-k">' + ICON.star + 'Совет хозяйке</span><p>' + esc(r.tip) + '</p></aside>' +
-      '<div class="actions">' + menuButton(r) +
-      '<button class="btn btn-secondary" data-act="share-recipe" data-id="' + r.id + '">' + ICON.share + 'Поделиться рецептом</button></div>';
+      menuBlock(r, 'Поделиться рецептом');
   }
 
   function guestsStepper() {
     var g = state.guests;
+    var chips = QUICK_GUESTS.map(function (v) {
+      return '<button class="chip' + (v === g ? ' on' : '') + '" data-act="guests-set" data-v="' + v + '" aria-pressed="' + (v === g) + '">' + v + '</button>';
+    }).join('');
     return '<div class="stepper big" role="group" aria-label="Число гостей"><span class="stepper-label">Гостей:</span>' +
       '<button class="round" data-act="guests-" aria-label="Меньше гостей"' + (g <= MIN_PEOPLE ? ' disabled' : '') + '>−</button>' +
       '<output class="stepper-val" data-testid="guests">' + g + '</output>' +
-      '<button class="round" data-act="guests+" aria-label="Больше гостей"' + (g >= MAX_PEOPLE ? ' disabled' : '') + '>+</button></div>';
+      '<button class="round" data-act="guests+" aria-label="Больше гостей"' + (g >= MAX_PEOPLE ? ' disabled' : '') + '>+</button></div>' +
+      '<div class="chips" role="group" aria-label="Быстрый выбор числа гостей"><span class="chips-label">Быстро:</span>' + chips + '</div>';
   }
 
   function dishAmount(r) {
     if (r.whole) {
-      var k = menuFactor(r, state.guests), f = WHOLE_FORMS[r.whole] || [r.whole, r.whole, r.whole];
-      return k + ' ' + plural(k, f) + ' по ' + r.serves + ' ' + plural(r.serves, PORTION);
+      var k = wholeCount(r, state.guests);
+      var s = wholeText(r, k);
+      if (state.guests <= r.serves / 2) s += ' · ' + r.whole[0] + ' целиком — останется';
+      return s;
     }
     return 'на ' + state.guests + ' ' + plural(state.guests, PORTION);
   }
@@ -335,7 +445,7 @@
     setHeader('Моё меню', true);
     if (!state.menu.length) {
       return '<h1 class="page-title">Моё меню на праздник</h1>' +
-        '<div class="empty">' + '<div class="empty-art">' + ART.empty() + '</div>' +
+        '<div class="empty"><div class="empty-art">' + ART.empty() + '</div>' +
         '<p>В меню пока нет блюд. Откройте любой рецепт и нажмите «Добавить в меню».</p>' +
         '<p>Или соберите готовое праздничное меню одним нажатием: два салата, горячее, закуска и сладкое.</p></div>' +
         '<div class="actions col">' +
@@ -343,14 +453,14 @@
         '<a class="btn btn-secondary" href="#">Выбрать блюда самому</a></div>';
     }
     var groups = D.CATEGORIES.map(function (c) {
-      var ids = state.menu.filter(function (id) { return byId[id].cat === c.id; });
+      var ids = state.menu.filter(function (id) { return rec(id).cat === c.id; });
       if (!ids.length) return '';
       return '<h2 class="sec-title">' + esc(c.title) + '</h2><ul class="mlist">' + ids.map(function (id) {
-        var r = byId[id];
-        return '<li class="mitem"><a class="mitem-link" href="#r/' + id + '">' +
+        var r = rec(id);
+        return '<li class="mitem"><a class="mitem-link" href="#r/' + id + '?from=menu">' +
           '<span class="mitem-art">' + ART.dish(id) + '</span>' +
           '<span class="mitem-body"><span class="mitem-title">' + esc(r.title) + '</span>' +
-          '<span class="mitem-meta">' + dishAmount(r) + '</span></span></a>' +
+          '<span class="mitem-meta">' + esc(dishAmount(r)) + '</span></span></a>' +
           '<button class="btn btn-small" data-act="menu-remove" data-id="' + id + '" aria-label="Убрать «' + esc(r.title) + '» из меню">Убрать</button></li>';
       }).join('') + '</ul>';
     }).join('');
@@ -373,34 +483,49 @@
         '<p>Список пуст. Он собирается сам из блюд вашего меню — с учётом числа гостей.</p></div>' +
         '<div class="actions col"><a class="btn btn-primary" href="#menu">' + ICON.menu + 'Перейти к меню</a></div>';
     }
-    var items = buildShopping(state.menu, state.guests);
-    var total = items.length, got = items.filter(function (it) { return state.bought[it.name]; }).length;
+    pruneBought();
+    var list = buildShopping(state.menu, state.guests, state.bought), items = list.items;
+    var total = items.length, got = items.filter(function (it) { return it.bought; }).length;
+    var anyMark = Object.keys(state.bought).length > 0;
     var n = state.menu.length;
     var groups = D.DEPARTMENTS.map(function (d) {
-      var list = items.filter(function (it) { return it.dept === d.id; });
-      if (!list.length) return '';
-      return '<h2 class="sec-title">' + esc(d.title) + '</h2><ul class="shop">' + list.map(function (it) {
-        var b = !!state.bought[it.name];
-        return '<li class="' + (b ? 'bought' : '') + '"><label class="chk">' +
-          '<input type="checkbox" data-act="buy" data-name="' + esc(it.name) + '"' + (b ? ' checked' : '') + '>' +
+      var dl = items.filter(function (it) { return it.dept === d.id; });
+      if (!dl.length) return '';
+      return '<h2 class="sec-title">' + esc(d.title) + '</h2><ul class="shop">' + dl.map(function (it) {
+        return '<li class="' + (it.bought ? 'bought' : (it.partial ? 'partial' : '')) + '"><label class="chk">' +
+          '<input type="checkbox" data-act="buy" data-name="' + esc(it.name) + '"' + (it.bought ? ' checked' : '') + '>' +
           '<span class="box" aria-hidden="true">' + ICON.check + '</span>' +
-          '<span class="shop-name">' + esc(it.name) + '</span>' +
-          '<span class="shop-q">' + esc(it.amount) + '</span></label></li>';
+          '<span class="shop-main"><span class="shop-name">' + esc(it.name) + '</span>' +
+          '<span class="shop-q">' + esc(it.amount) + '</span>' +
+          (it.partial ? '<span class="shop-sub" data-testid="more">Куплено ' + esc(it.got) + ', докупить ' + esc(it.more) + '</span>' : '') +
+          '</span></label></li>';
       }).join('') + '</ul>';
     }).join('');
+    var homeBlock = list.home.length ? '<aside class="home-check"><span class="home-k">' + ICON.home + 'Проверьте, есть ли дома:</span> ' +
+      '<span data-testid="home-list">' + esc(list.home.map(lower).join(', ')) + '</span></aside>' : '';
     return '<h1 class="page-title">Список покупок</h1>' +
       '<p class="lead">Для ' + n + ' ' + plural(n, ['блюда', 'блюд', 'блюд']) + ' на ' + guestsText(state.guests) + '. Нажимайте на продукт, когда купите его.</p>' +
       '<p class="progress" data-testid="progress">Куплено: <b>' + got + '</b> из ' + total + '</p>' +
-      groups +
+      groups + homeBlock +
       '<div class="actions col">' +
       '<button class="btn btn-primary" data-act="share-shop">' + ICON.share + 'Поделиться списком</button>' +
-      (got ? '<button class="btn btn-outline" data-act="buy-reset">Снять все галочки</button>' : '') +
+      (anyMark ? '<button class="btn btn-outline" data-act="buy-reset">Снять все галочки</button>' : '') +
       '<a class="btn btn-outline" href="#menu">' + ICON.menu + 'Изменить меню</a></div>';
   }
 
   function render() {
-    var r = parseRoute(location.hash);
+    var r = parseRoute(location.hash), prev = current;
     current = r;
+    if (r.name === 'recipe' && routeKey(r) !== routeKey(prev)) {
+      // Открыли из меню — показываем количества на гостей меню.
+      var rr = rec(r.id);
+      if (r.fromMenu) {
+        state.portions[r.id] = rr.whole ? wholeCount(rr, state.guests) : state.guests;
+        state.fromMenu[r.id] = true;
+      } else if (state.fromMenu[r.id]) {
+        delete state.portions[r.id]; delete state.fromMenu[r.id];
+      }
+    }
     var html;
     if (r.name === 'cat') html = viewCat(r.id);
     else if (r.name === 'recipe') html = viewRecipe(r.id);
@@ -411,26 +536,31 @@
     app.setAttribute('data-view', r.name);
   }
 
-  // Перерисовать текущий экран, сохранив прокрутку и фокус.
-  function rerender() {
-    var y = window.scrollY, a = document.activeElement, key = null;
-    if (a && a.getAttribute && a.getAttribute('data-act')) {
-      key = '[data-act="' + a.getAttribute('data-act') + '"]' + (a.getAttribute('data-id') ? '[data-id="' + a.getAttribute('data-id') + '"]' : '');
-    }
+  // Перерисовать текущий экран, сохранив прокрутку и фокус (на ту же кнопку/галочку).
+  function focusKey(el) {
+    if (!el || !el.getAttribute || !el.getAttribute('data-act')) return null;
+    var key = '[data-act="' + el.getAttribute('data-act') + '"]';
+    ['data-id', 'data-name', 'data-i', 'data-v'].forEach(function (a) {
+      var v = el.getAttribute(a);
+      if (v !== null) key += '[' + a + '="' + String(v).replace(/["\\]/g, '\\$&') + '"]';
+    });
+    return key;
+  }
+  function rerender(fallbackKey) {
+    var y = window.scrollY, key = focusKey(document.activeElement);
     render();
     window.scrollTo(0, y);
-    if (key) {
-      var el = app.querySelector(key);
-      if (el && !el.disabled) el.focus({ preventScroll: true });
-    }
+    var el = (key && app.querySelector(key)) || (fallbackKey && app.querySelector(fallbackKey));
+    if (el && !el.disabled) el.focus({ preventScroll: true });
   }
 
   /* ---------- Тексты «Поделиться» ---------- */
   function footer(hash) { return '\n\nРецепты к Новому году — ' + APP_URL + (hash || ''); }
 
   function recipeText(r) {
-    var p = portionsOf(r), f = p / r.serves;
-    var lines = ['🎄 ' + r.title, 'Время: ' + r.time + (r.wait ? ' ' + r.wait : '') + ' · Порций: ' + p, '', 'Ингредиенты:'];
+    var a = amountOf(r), f = factorOf(r);
+    var amount = r.whole ? wholeText(r, a) : 'Порций: ' + a;
+    var lines = ['🎄 ' + r.title, 'Время: ' + r.time + (r.wait ? ' ' + r.wait : '') + ' · ' + amount, '', 'Ингредиенты:'];
     var lastG = null;
     r.ingredients.forEach(function (ing) {
       if ((ing.group || '') !== lastG) { lastG = ing.group || ''; if (lastG) lines.push(lastG + ':'); }
@@ -442,40 +572,46 @@
     return lines.join('\n') + footer('#r/' + r.id);
   }
   function menuText() {
-    var lines = ['🎄 Моё новогоднее меню на ' + guestsText(state.guests)];
+    var lines = ['🎄 Наше меню на Новый год (на ' + guestsText(state.guests) + '):', ''];
     D.CATEGORIES.forEach(function (c) {
-      var ids = state.menu.filter(function (id) { return byId[id].cat === c.id; });
+      var ids = state.menu.filter(function (id) { return rec(id).cat === c.id; });
       if (!ids.length) return;
-      lines.push('', c.title + ':');
-      ids.forEach(function (id) { lines.push('• ' + byId[id].title + ' — ' + APP_URL + '#r/' + id); });
+      lines.push(c.title + ': ' + ids.map(function (id) { return rec(id).title; }).join(', '));
     });
     return lines.join('\n') + footer('');
   }
   function shopText() {
-    var items = buildShopping(state.menu, state.guests);
-    var left = items.filter(function (it) { return !state.bought[it.name]; });
-    var partial = left.length > 0 && left.length < items.length;
-    var use = left.length ? left : items;
-    var lines = ['🛒 Список покупок к новогоднему столу (' + guestsText(state.guests) + ')' + (partial ? ' — ещё купить:' : '')];
+    var list = buildShopping(state.menu, state.guests, state.bought);
+    var left = list.items.filter(function (it) { return !it.bought; });
+    var partial = left.length < list.items.length;
+    var lines = ['🛒 Список покупок к новогоднему столу (' + guestsText(state.guests) + ')' + (partial ? ' — ещё купить:' : ':')];
     D.DEPARTMENTS.forEach(function (d) {
-      var list = use.filter(function (it) { return it.dept === d.id; });
-      if (!list.length) return;
+      var dl = left.filter(function (it) { return it.dept === d.id; });
+      if (!dl.length) return;
       lines.push('', d.title + ':');
-      list.forEach(function (it) { lines.push('• ' + it.name + ' — ' + it.amount); });
+      dl.forEach(function (it) { lines.push('• ' + it.name + ' — ' + (it.partial ? 'докупить ' + it.more : it.amount)); });
     });
+    if (!left.length) lines.push('', 'Всё куплено!');
+    if (list.home.length) lines.push('', 'Проверьте, есть ли дома: ' + list.home.map(lower).join(', ') + '.');
     return lines.join('\n') + footer('');
   }
 
-  /* ---------- Поделиться / скопировать ---------- */
-  var toastTimer = null;
-  function toast(msg) {
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.hidden = false;
-    t.classList.add('show');
+  /* ---------- Плашка, копирование, окно ---------- */
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null, toastUndo = null;
+  function toast(msg, undo) {
+    toastUndo = undo || null;
+    toastEl.innerHTML = '<span class="toast-msg">' + esc(msg) + '</span>' +
+      (undo ? '<button type="button" class="toast-undo" data-toast-undo>Вернуть</button>' : '');
+    toastEl.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove('show'); t.hidden = true; }, 3200);
+    toastTimer = setTimeout(hideToast, undo ? 5000 : 3200);
   }
+  function hideToast() { toastEl.classList.remove('show'); toastUndo = null; }
+  toastEl.addEventListener('click', function (e) {
+    if (e.target.closest('[data-toast-undo]') && toastUndo) { var u = toastUndo; hideToast(); u(); }
+  });
+
   function legacyCopy(text) {
     var ta = document.createElement('textarea');
     ta.value = text; ta.setAttribute('readonly', '');
@@ -487,21 +623,39 @@
     document.body.removeChild(ta);
     return ok;
   }
+  var modal = document.getElementById('copy-modal');
+  var modalReturn = null;
   function showManualCopy(text) {
-    var m = document.getElementById('copy-modal');
-    m.querySelector('textarea').value = text;
-    m.hidden = false;
-    m.querySelector('textarea').focus();
-    m.querySelector('textarea').select();
+    modalReturn = document.activeElement;
+    var ta = modal.querySelector('textarea');
+    ta.value = text;
+    modal.hidden = false;
+    ta.focus();
+    ta.select();
   }
+  function closeModal() {
+    if (modal.hidden) return;
+    modal.hidden = true;
+    if (modalReturn && modalReturn.focus && document.contains(modalReturn)) modalReturn.focus();
+    modalReturn = null;
+  }
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+  document.getElementById('copy-close').addEventListener('click', closeModal);
+  document.addEventListener('keydown', function (e) {
+    if (modal.hidden) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+    if (e.key === 'Tab') { // фокус держится в окне
+      var f = Array.prototype.slice.call(modal.querySelectorAll('textarea, button'));
+      var i = f.indexOf(document.activeElement);
+      e.preventDefault();
+      f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+    }
+  });
   function copyText(text) {
     function done() { toast('Скопировано — вставьте в сообщение'); }
     function fallback() { if (legacyCopy(text)) done(); else showManualCopy(text); }
     try {
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text).then(done, fallback);
-        return;
-      }
+      if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); return; }
     } catch (e) { /* дальше */ }
     fallback();
   }
@@ -520,50 +674,76 @@
   }
 
   /* ---------- Действия ---------- */
-  function toggleMenu(id) {
+  var lastMenuTap = dict();
+  function menuLocked(id) {
+    var now = Date.now();
+    if (lastMenuTap[id] && now - lastMenuTap[id] < 600) return true;
+    lastMenuTap[id] = now;
+    return false;
+  }
+  function addToMenu(id, at) {
+    if (state.menu.indexOf(id) >= 0) return;
+    if (typeof at === 'number' && at >= 0 && at <= state.menu.length) state.menu.splice(at, 0, id);
+    else state.menu.push(id);
+  }
+  function removeFromMenu(id, fallbackKey) {
     var k = state.menu.indexOf(id);
-    if (k >= 0) { state.menu.splice(k, 1); toast('Убрано из меню'); }
-    else { state.menu.push(id); toast('Добавлено в меню'); }
-    save(); rerender();
+    if (k < 0) return;
+    state.menu.splice(k, 1);
+    pruneBought(); save(); rerender(fallbackKey);
+    toast('Убрано: ' + rec(id).title, function () {
+      addToMenu(id, k); save(); rerender();
+    });
   }
 
   var actions = {
-    'menu-toggle': function (el) { toggleMenu(el.getAttribute('data-id')); },
-    'menu-remove': function (el) {
-      var id = el.getAttribute('data-id'), k = state.menu.indexOf(id);
-      if (k >= 0) state.menu.splice(k, 1);
-      save(); rerender(); toast('Убрано из меню');
+    'menu-add': function (el) {
+      var id = el.getAttribute('data-id');
+      if (menuLocked(id)) return;
+      addToMenu(id); save(); rerender('[data-act="menu-del"][data-id="' + id + '"]'); toast('Добавлено в меню');
     },
+    'menu-del': function (el) {
+      var id = el.getAttribute('data-id');
+      if (menuLocked(id)) return;
+      removeFromMenu(id, '[data-act="menu-add"][data-id="' + id + '"]');
+    },
+    'menu-remove': function (el) { removeFromMenu(el.getAttribute('data-id'), '[data-act="guests+"]'); },
     'ready-menu': function () {
       state.menu = D.READY_MENU.slice();
       save(); rerender(); window.scrollTo(0, 0); toast('Готовое меню собрано');
     },
-    'por-': function (el) { changePortions(el.getAttribute('data-id'), -1); },
-    'por+': function (el) { changePortions(el.getAttribute('data-id'), 1); },
-    'guests-': function () { state.guests = clamp(state.guests - 1, MIN_PEOPLE, MAX_PEOPLE); save(); rerender(); },
-    'guests+': function () { state.guests = clamp(state.guests + 1, MIN_PEOPLE, MAX_PEOPLE); save(); rerender(); },
+    'por-': function (el) { changeAmount(el.getAttribute('data-id'), -1); },
+    'por+': function (el) { changeAmount(el.getAttribute('data-id'), 1); },
+    'guests-': function () { setGuests(state.guests - 1); },
+    'guests+': function () { setGuests(state.guests + 1); },
+    'guests-set': function (el) { setGuests(+el.getAttribute('data-v')); },
     'step': function (el) {
       var id = el.getAttribute('data-id'), k = +el.getAttribute('data-i');
-      var arr = state.steps[id] || [], pos = arr.indexOf(k);
+      var arr = (state.steps[id] || []).slice(), pos = arr.indexOf(k);
       if (pos >= 0) arr.splice(pos, 1); else arr.push(k);
       if (arr.length) state.steps[id] = arr; else delete state.steps[id];
       save(); rerender();
     },
-    'steps-reset': function (el) { delete state.steps[el.getAttribute('data-id')]; save(); rerender(); },
-    'buy-reset': function () { state.bought = {}; save(); rerender(); },
-    'share-recipe': function (el) { var r = byId[el.getAttribute('data-id')]; share(r.title, recipeText(r)); },
-    'share-menu': function () { share('Моё новогоднее меню', menuText()); },
+    'steps-reset': function (el) { delete state.steps[el.getAttribute('data-id')]; save(); rerender('.step'); },
+    'buy-reset': function () { state.bought = dict(); save(); rerender('[data-act="share-shop"]'); },
+    'share-recipe': function (el) { var r = rec(el.getAttribute('data-id')); share(r.title, recipeText(r)); },
+    'share-menu': function () { share('Наше меню на Новый год', menuText()); },
     'share-shop': function () { share('Список покупок', shopText()); }
   };
-  function changePortions(id, d) {
-    var r = byId[id];
-    state.portions[id] = clamp(portionsOf(r) + d, MIN_PEOPLE, MAX_PEOPLE);
+  function setGuests(v) {
+    state.guests = clamp(v, MIN_PEOPLE, MAX_PEOPLE);
+    save(); rerender();
+  }
+  function changeAmount(id, d) {
+    var r = rec(id);
+    state.portions[id] = clamp(amountOf(r) + d, 1, r.whole ? MAX_WHOLE : MAX_PEOPLE);
+    delete state.fromMenu[id];
     rerender();
   }
 
   document.addEventListener('click', function (e) {
     var el = e.target.closest('[data-act]');
-    if (el && el.tagName !== 'INPUT' && actions[el.getAttribute('data-act')]) {
+    if (el && el.tagName !== 'INPUT' && own(actions, el.getAttribute('data-act'))) {
       e.preventDefault();
       actions[el.getAttribute('data-act')](el);
       return;
@@ -578,18 +758,17 @@
     var el = e.target;
     if (el.getAttribute && el.getAttribute('data-act') === 'buy') {
       var name = el.getAttribute('data-name');
-      if (el.checked) state.bought[name] = true; else delete state.bought[name];
+      if (el.checked) {
+        var v = needs(state.menu, state.guests).get(name);
+        if (v) state.bought[name] = roundNeed(name, v);
+      } else delete state.bought[name];
       save(); rerender();
     }
   });
   backBtn.addEventListener('click', function () { goBack(); });
-  document.getElementById('copy-close').addEventListener('click', function () {
-    document.getElementById('copy-modal').hidden = true;
-  });
   window.addEventListener('popstate', function (e) {
     render();
-    var y = e.state && e.state.scroll ? e.state.scroll : 0;
-    window.scrollTo(0, y);
+    window.scrollTo(0, e.state && e.state.scroll ? e.state.scroll : 0);
   });
   window.addEventListener('hashchange', function () {
     if (routeKey(parseRoute(location.hash)) !== routeKey(current)) { render(); window.scrollTo(0, 0); }
@@ -599,5 +778,5 @@
   render();
 
   // Для автотеста и проверяющих.
-  window.NYR = { buildShopping: buildShopping, fmtIng: fmtIng, state: state, menuFactor: menuFactor };
+  window.NYR = { buildShopping: buildShopping, fmtIng: fmtIng, fmtShop: fmtShop, state: state, menuFactor: menuFactor, parseRoute: parseRoute };
 })();
