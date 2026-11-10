@@ -21,6 +21,10 @@
 - 20 рецептов (по 5 в каждом разделе), меню, список покупок, поделиться.
 - Без SDK площадок, рекламы и перевода (только русский).
 - Тестовая ссылка: https://romangerasimov71-spec.github.io/new-year-recipes/
+  Pages включён через ветку `gh-pages` (браузера на Маке ночью не было). **После каждой правки в `main`
+  обновляй её:** `git fetch origin main && git push origin origin/main:refs/heads/gh-pages`.
+  Роман может позже переключить Pages на `main` в настройках.
+- Автотест: `node tools/smoke.js` (или `node tools/smoke.js <ссылка>`).
 
 ## Файлы
 - `index.html` — вход; код в `js/`, стили в `css/`.
