@@ -131,7 +131,7 @@
   // «4–5 порций»: форма слова — по последнему числу.
   function portionsWord(t) { return plural(+String(t).split('–').pop(), PORTION); }
   function wholeText(r, k) {
-    var t = k === 1 ? servesText(r) : String(k * r.serves);
+    var t = servesText(r).split('–').map(function (x) { return String(k * +x); }).join('–');
     return k + ' ' + plural(k, r.whole) + ' — ' + t + ' ' + portionsWord(t);
   }
 
