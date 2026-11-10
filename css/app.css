@@ -118,9 +118,9 @@ svg { display: block; }
 
 /* ---------- Главная ---------- */
 .hero { text-align: center; margin: 0 0 6px; }
-.hero-art { max-width: 420px; margin: 0 auto; }
+.hero-art { max-width: 300px; margin: 0 auto; }
 .hero-art svg { width: 100%; height: auto; }
-.hero h1 { font-size: 31px; line-height: 1.2; margin: 6px 0 4px; color: var(--red-dark); }
+.hero h1 { font-size: 29px; line-height: 1.2; margin: 6px 0 4px; color: var(--red-dark); }
 .hero .lead { margin: 0 auto 4px; max-width: 30em; }
 
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }

@@ -208,7 +208,8 @@
   }
 
   function metaLine(r) {
-    return esc(r.time) + ' · ' + esc(r.level) + ' · на ' + r.serves + ' ' + plural(r.serves, PORTION);
+    var nb = function (t) { return esc(t).replace(/ /g, '\u00a0'); };
+    return nb(r.time) + ' · ' + nb(r.level) + ' · ' + nb('на ' + r.serves + ' ' + plural(r.serves, PORTION));
   }
 
   function viewHome() {
@@ -223,8 +224,8 @@
     }).join('');
     return '<section class="hero">' +
       '<div class="hero-art">' + ART.hero() + '</div>' +
-      '<h1>Рецепты к Новому году</h1>' +
-      '<p class="lead">Проверенная классика по шагам, меню на праздник и список покупок.</p>' +
+      '<div class="hero-text"><h1>Рецепты к Новому году</h1>' +
+      '<p class="lead">Проверенная классика по шагам, меню на праздник и список покупок.</p></div>' +
       '</section>' +
       '<h2 class="sec-title">Выберите раздел</h2>' +
       '<nav class="tiles" aria-label="Разделы">' + tiles + '</nav>' +
