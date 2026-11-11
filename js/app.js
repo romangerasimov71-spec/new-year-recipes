@@ -128,6 +128,18 @@
   function wholeCount(r, guests) { return Math.max(1, Math.ceil(guests / r.serves - EPS)); }
   function menuFactor(r, guests) { return r.whole ? wholeCount(r, guests) : guests / r.serves; }
   function servesText(r) { return r.servesText || String(r.serves); }
+  // Слова для порций: у напитков — кружки и стаканы, у десертов в банке — баночки.
+  function portionForms(r) { return r.portion || PORTION; }
+  function portionsOf(r, n) { return n + ' ' + plural(n, portionForms(r)); }
+  /* ---------- Разделы ----------
+     Базовые разделы — плитки на главной; «Модный стол» (featured) — плашка «Новинка».
+     Модное блюдо (cat: 'trendy') показывается и в своём базовом разделе (alsoIn) — после классики. */
+  var BASE_CATS = D.CATEGORIES.filter(function (c) { return !c.featured; });
+  var FEATURED = D.CATEGORIES.filter(function (c) { return c.featured; });
+  function recipesIn(id) {
+    var own = D.RECIPES.filter(function (r) { return r.cat === id; });
+    return own.concat(D.RECIPES.filter(function (r) { return r.alsoIn === id && r.cat !== id; }));
+  }
   // «4–5 порций»: форма слова — по последнему числу.
   function portionsWord(t) { return plural(+String(t).split('–').pop(), PORTION); }
   function wholeText(r, k) {
@@ -306,7 +318,7 @@
   }
   function nb(t) { return esc(t).replace(/ /g, '\u00a0'); }
   function metaLine(r) {
-    var y = r.whole ? wholeText(r, 1) : 'на ' + r.serves + ' ' + plural(r.serves, PORTION);
+    var y = r.whole ? wholeText(r, 1) : 'на ' + portionsOf(r, r.serves);
     return nb(r.time) + ' · ' + nb(r.level) + ' · ' + nb(y).replace('\u00a0—\u00a0', '\u00a0— ');
   }
 
@@ -333,7 +345,9 @@
     box.classList.add('photo-failed');
     box.innerHTML = fallbackArt(img.getAttribute('data-fb') || '');
   };
-  function dishPhoto(r, size, first) { return photo(r.id, size, r.title, 'dish:' + r.id, first); }
+  // photo: false в данных — фото ещё нет: сразу рисунок, файл не запрашиваем.
+  function dishPhoto(r, size, first) { return r.photo === false ? ART.dish(r.id) : photo(r.id, size, r.title, 'dish:' + r.id, first); }
+  function catPhoto(c, size) { return c.photo === false ? ART.cat(c.id) : photo('cat-' + c.id, size, c.title, 'cat:' + c.id, false); }
 
   /* ---------- Фото шагов ----------
      img/photo/steps/full/<id>-<N>.webp (960×720) и img/photo/steps/thumb/<id>-<N>.webp (480×360), N — номер шага. */
@@ -365,12 +379,22 @@
   function viewHome() {
     setHeader('Новогодний стол', false);
     var n = state.menu.length;
-    var tiles = D.CATEGORIES.map(function (c) {
-      var cnt = D.RECIPES.filter(function (r) { return r.cat === c.id; }).length;
+    var tiles = BASE_CATS.map(function (c) {
+      var cnt = recipesIn(c.id).length;
       return '<a class="tile" href="#c/' + c.id + '">' +
-        '<span class="tile-art">' + photo('cat-' + c.id, 'thumb', c.title, 'cat:' + c.id, false) + '</span>' +
+        '<span class="tile-art">' + catPhoto(c, 'thumb') + '</span>' +
         '<span class="tile-name">' + esc(c.title) + '</span>' +
         '<span class="tile-sub">' + cnt + ' ' + plural(cnt, RECIPE_W) + '</span></a>';
+    }).join('');
+    // Плашка «Модный стол» — сразу под кнопками меню и покупок, над плитками разделов.
+    var banners = FEATURED.map(function (c) {
+      var cnt = recipesIn(c.id).length;
+      return '<a class="feature" href="#c/' + c.id + '" data-testid="feature-' + c.id + '">' +
+        '<span class="feature-art">' + catPhoto(c, 'thumb') + '</span>' +
+        '<span class="feature-body"><span class="feature-new">Новинка</span>' +
+        '<span class="feature-name">' + esc(c.title) + '</span>' +
+        '<span class="feature-sub">' + esc(c.sub || '') + (c.sub ? ' · ' : '') + cnt + '\u00a0' + plural(cnt, RECIPE_W) + '</span></span>' +
+        '<span class="feature-go" aria-hidden="true">\u203A</span></a>';
     }).join('');
     return '<section class="hero">' +
       '<div class="hero-art">' + photo('hero', 'thumb', 'Праздничный новогодний стол', 'hero', true,
@@ -385,24 +409,37 @@
       '<a class="big-btn" href="#shop">' + ICON.cart +
       '<span class="big-btn-text">Список покупок</span>' +
       '<span class="badge">' + (n ? 'на\u00a0' + guestsText(state.guests).replace(' ', '\u00a0') : 'пусто') + '</span></a>' +
-      '</div>' +
+      '</div>' + banners +
       '<h2 class="sec-title">Выберите раздел</h2>' +
       '<nav class="tiles" aria-label="Разделы">' + tiles + '</nav>';
   }
 
+  function rcard(r, k, catId) {
+    var inMenu = state.menu.indexOf(r.id) >= 0, trendy = r.cat !== catId;
+    return '<li><a class="rcard" href="#r/' + r.id + '">' +
+      '<span class="rcard-art">' + dishPhoto(r, 'thumb', k < 4) + '</span>' +
+      '<span class="rcard-body"><span class="rcard-title">' + esc(r.title) + '</span>' +
+      '<span class="rcard-meta">' + metaLine(r) + '</span>' +
+      (trendy || inMenu ? '<span class="tags">' + (trendy ? '<span class="tag tag-trendy">Модное</span>' : '') +
+        (inMenu ? '<span class="tag">' + ICON.check + 'В моём меню</span>' : '') + '</span>' : '') +
+      '</span></a></li>';
+  }
   function viewCat(id) {
     var c = CATS.get(id);
     setHeader(c.title, true);
-    var list = D.RECIPES.filter(function (r) { return r.cat === id; }).map(function (r, k) {
-      var inMenu = state.menu.indexOf(r.id) >= 0;
-      return '<li><a class="rcard" href="#r/' + r.id + '">' +
-        '<span class="rcard-art">' + dishPhoto(r, 'thumb', k < 4) + '</span>' +
-        '<span class="rcard-body"><span class="rcard-title">' + esc(r.title) + '</span>' +
-        '<span class="rcard-meta">' + metaLine(r) + '</span>' +
-        (inMenu ? '<span class="tag">' + ICON.check + 'В моём меню</span>' : '') +
-        '</span></a></li>';
-    }).join('');
-    return '<h1 class="page-title">' + esc(c.title) + '</h1><ul class="rlist">' + list + '</ul>';
+    var list = recipesIn(id), html, k = 0;
+    if (c.groups) {
+      // «Модный стол»: подзаголовки по базовым разделам; напитки — свой подзаголовок.
+      html = c.groups.map(function (g) {
+        var part = list.filter(function (r) { return (r.alsoIn || 'drinks') === g.id; });
+        if (!part.length) return '';
+        return '<h2 class="sec-title">' + esc(g.title) + '</h2><ul class="rlist">' +
+          part.map(function (r) { return rcard(r, k++, id); }).join('') + '</ul>';
+      }).join('');
+    } else {
+      html = '<ul class="rlist">' + list.map(function (r) { return rcard(r, k++, id); }).join('') + '</ul>';
+    }
+    return '<h1 class="page-title">' + esc(c.title) + '</h1>' + (c.sub ? '<p class="lead cat-sub">' + esc(c.sub) + '</p>' : '') + html;
   }
 
   // Для целых блюд — число целых (курица, торт), для остальных — порции.
@@ -451,10 +488,10 @@
         (ph ? stepPhotoButton(r, k) : '') + '</li>';
     }).join('');
     var max = r.whole ? MAX_WHOLE : MAX_PEOPLE;
-    var label = r.whole ? 'Сколько:' : 'Порций:';
+    var label = r.whole ? 'Сколько:' : cap(portionForms(r)[2]) + ':';
     var under = r.whole ? '<p class="note strong" data-testid="whole-note">' + esc(wholeText(r, a)) + '</p>' : '';
     if (state.fromMenu[r.id]) under += '<p class="note from-menu" data-testid="from-menu">' + (r.whole ? 'Хватит ' : 'Количества ') + 'на ' + guestsText(state.guests) + ', как в вашем меню.</p>';
-    var yieldTxt = r.whole ? wholeText(r, 1) : r.serves + ' ' + plural(r.serves, PORTION);
+    var yieldTxt = r.whole ? wholeText(r, 1) : portionsOf(r, r.serves);
     return '<div class="r-top"><div class="r-hero">' + dishPhoto(r, 'full', true) + '</div><div class="r-head">' +
       '<h1 class="page-title">' + esc(r.title) + '</h1>' +
       '<ul class="facts">' +
@@ -497,7 +534,7 @@
       if (state.guests <= r.serves / 2) s += ' · ' + r.whole[0] + ' целиком — останется';
       return s;
     }
-    return 'на ' + state.guests + ' ' + plural(state.guests, PORTION);
+    return 'на ' + portionsOf(r, state.guests);
   }
 
   function viewMenu() {
@@ -618,7 +655,7 @@
 
   function recipeText(r) {
     var a = amountOf(r), f = factorOf(r);
-    var amount = r.whole ? wholeText(r, a) : 'Порций: ' + a;
+    var amount = r.whole ? wholeText(r, a) : cap(portionForms(r)[2]) + ': ' + a;
     var lines = ['🎄 ' + r.title, 'Время: ' + r.time + (r.wait ? ' ' + r.wait : '') + ' · ' + amount, '', 'Ингредиенты:'];
     var lastG = null;
     r.ingredients.forEach(function (ing) {

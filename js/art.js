@@ -34,7 +34,7 @@
     mayo: '#FFF8E7', egg: '#FFFFFF', yolk: '#F6C445', carrot: '#EE8A3A', potato: '#F4E4B0',
     pea: '#76AE3F', pickle: '#86A33A', beet: '#7E2448', wood: '#C8925A', wood2: '#A8743F'
   };
-  var BG = { salads: '#E6EEDB', hot: '#F7E0CC', snacks: '#F4E8C8', sweets: '#F6DFDF', other: '#F4E7D6' };
+  var BG = { salads: '#E6EEDB', hot: '#F7E0CC', snacks: '#F4E8C8', sweets: '#F6DFDF', trendy: '#E2E9F3', other: '#F4E7D6' };
 
   /* ---------- Детали ---------- */
   function shadow(cx, cy, rx, ry) { return E(cx, cy, rx, ry, COL.shadow); }
@@ -170,6 +170,59 @@
     return out;
   }
   function tomato(x, y, r) { return C(x, y, r, '#D9412F') + C(x - r * 0.35, y - r * 0.35, r * 0.3, 'rgba(255,255,255,.4)') + P('M' + f(x - 3) + ' ' + f(y - r + 1) + 'l3 2 3-2', 'none', st('#3E7A2E', 1.6)); }
+
+  /* ---------- Детали «Модного стола» ---------- */
+  function star(x, y, r, fill, ex, inner) {
+    var d = '';
+    for (var p = 0; p < 10; p++) { var a = -Math.PI / 2 + p * Math.PI / 5, rr = p % 2 ? r * (inner || 0.45) : r; d += (p ? 'L' : 'M') + f(x + Math.cos(a) * rr) + ' ' + f(y + Math.sin(a) * rr); }
+    return P(d + 'Z', fill, ex);
+  }
+  function mandarin(x, y, r) {
+    return C(x, y, r, '#F2891E') + C(x + r * 0.2, y + r * 0.25, r * 0.8, '#EC7E14', ' opacity=".5"') +
+      C(x - r * 0.38, y - r * 0.38, r * 0.26, 'rgba(255,255,255,.4)') + C(x + r * 0.1, y - r * 0.86, r * 0.12, '#6E8A3A') +
+      P('M' + f(x + r * 0.15) + ' ' + f(y - r * 0.9) + 'q' + f(r * 0.5) + ' ' + f(-r * 0.55) + ' ' + f(r * 0.95) + ' ' + f(-r * 0.15) + 'q' + f(-r * 0.5) + ' ' + f(r * 0.4) + ' ' + f(-r * 0.95) + ' ' + f(r * 0.15) + 'z', '#4E8E3A');
+  }
+  // Кружок цитруса: color — кожура, pulp — мякоть.
+  function citrusSlice(x, y, r, color, pulp) {
+    var out = C(x, y, r, color || '#F2891E') + C(x, y, r - 1.8, '#FFF2D6') + C(x, y, r - 3, pulp || '#F7A440');
+    for (var k = 0; k < 8; k++) {
+      var a = k * Math.PI / 4;
+      out += P('M' + f(x) + ' ' + f(y) + 'L' + f(x + Math.cos(a) * (r - 3)) + ' ' + f(y + Math.sin(a) * (r - 3)), 'none', st('#FFE3B0', 1));
+    }
+    return out;
+  }
+  function rosemary(x, y, len, a) {
+    var out = P('M0 0L' + len + ' 0', 'none', st('#5B6E3A', 1.4));
+    for (var k = 2; k < len; k += 3.2) out += P('M' + f(k) + ' 0l2.5-4M' + f(k) + ' 0l2.5 4', 'none', st('#3F6B3E', 1.6));
+    return G('translate(' + f(x) + ' ' + f(y) + ') rotate(' + (a || 0) + ')', out);
+  }
+  function leaf(x, y, l, w, a, color) { return E(x, y, l, w, color, rot(a, x, y)) + P('M' + f(x - l * 0.8) + ' ' + f(y) + 'H' + f(x + l * 0.8), 'none', st('rgba(255,255,255,.35)', 0.9) + rot(a, x, y)); }
+  function olive(x, y, r) { return C(x, y, r, '#2B2622') + C(x, y, r * 0.35, '#4A3A30') + C(x - r * 0.4, y - r * 0.45, r * 0.25, 'rgba(255,255,255,.45)'); }
+  function cherryTom(x, y, r) { return C(x, y, r, '#D9412F') + C(x - r * 0.35, y - r * 0.35, r * 0.3, 'rgba(255,255,255,.45)'); }
+  function sparkle(x, y, r, color) { return P('M' + f(x) + ' ' + f(y - r) + 'Q' + f(x) + ' ' + f(y) + ' ' + f(x + r) + ' ' + f(y) + 'Q' + f(x) + ' ' + f(y) + ' ' + f(x) + ' ' + f(y + r) + 'Q' + f(x) + ' ' + f(y) + ' ' + f(x - r) + ' ' + f(y) + 'Q' + f(x) + ' ' + f(y) + ' ' + f(x) + ' ' + f(y - r) + 'Z', color || '#F2C230'); }
+  // Прозрачный стакан/банка: слои снизу вверх [[высота, цвет]], top — что сверху.
+  function glassCup(x, bottom, w, h, layers, top, opt) {
+    opt = opt || {};
+    var out = shadow(x, bottom + 3, w * 0.55, 4), y = bottom - 3, L = x - w / 2;
+    out += R(L, bottom - h, w, h, opt.r || 6, 'rgba(214,236,244,.55)');
+    layers.forEach(function (l, k) {
+      out += R(L + 3, y - l[0], w - 6, l[0], k === 0 ? (opt.r || 6) - 2 : 0, l[1]);
+      if (l[2]) out += P('M' + f(L + 3) + ' ' + f(y - l[0]) + 'h' + f(w - 6), 'none', st(l[2], 1.6));
+      y -= l[0];
+    });
+    out += E(x, y, w / 2 - 3, 3.5, layers.length ? layers[layers.length - 1][1] : 'none');
+    out += top ? top(y) : '';
+    out += R(L, bottom - h, w, h, opt.r || 6, 'none', st('#A9C9D6', 2)) + E(x, bottom - h, w / 2, 3.5, 'none', st('#A9C9D6', 2)) +
+      R(L + 4, bottom - h + 6, 3.5, h - 14, 1.7, 'rgba(255,255,255,.6)');
+    return out;
+  }
+  function mug(x, bottom, w, h, body, liquid, top) {
+    var L = x - w / 2, out = shadow(x, bottom + 3, w * 0.6, 5);
+    out += P('M' + f(x + w / 2 - 2) + ' ' + f(bottom - h + 12) + 'q22 0 20 18t-20 18', 'none', st(body, 6));
+    out += R(L, bottom - h, w, h, 10, body) + E(x, bottom - h, w / 2, 6, body) + E(x, bottom - h + 1, w / 2 - 4, 4.4, liquid);
+    out += R(L + 5, bottom - h + 10, 4, h - 22, 2, 'rgba(255,255,255,.25)');
+    return out + (top ? top(bottom - h + 1) : '');
+  }
 
   /* ---------- Блюда ---------- */
   var DISHES = {
@@ -479,7 +532,296 @@
         P('M172 102q10 4 20 0M168 120q14 5 28 0', 'none', ic) + C(182, 90, 2, COL.red) + C(176, 110, 2, '#2E8A4E') + C(190, 112, 2, COL.gold);
       out += P('M92 144l3-6 3 6-3 6z', COL.red) + C(150, 148, 2.6, COL.gold);
       return out;
+    },
+    /* ---------- Модный стол ---------- */
+    'snack-tree': function () {
+      var rand = rng(201), out = board(30, 38, 150, 132);
+      var rows = 7, top = 56, bot = 146, kinds = ['cheese', 'salami', 'cuc', 'tom'];
+      for (var k = 0; k < rows; k++) {
+        var y = bot - k * (bot - top) / (rows - 1), hw = 60 * (1 - k / (rows + 0.6)), n = Math.max(1, Math.round(hw * 2 / 13));
+        var kind = kinds[k % 4];
+        if (k) out += rosemary(105 - hw - 2, y + 7, hw * 2 + 4, 0);
+        for (var j = 0; j < n; j++) {
+          var x = 105 - hw + (n === 1 ? hw : j * hw * 2 / (n - 1));
+          if (kind === 'cheese') out += cube(x, y, 9.5, '#F5C842', rand() * 16 - 8);
+          else if (kind === 'salami') out += C(x, y, 6.2, '#B03A3A') + C(x - 2, y - 1.5, 1.1, '#F2C9BC') + C(x + 2, y + 1.6, 1, '#F2C9BC') + C(x + 1.8, y - 2.4, 0.9, '#F2C9BC');
+          else if (kind === 'cuc') out += P('M' + f(x - 6.5) + ' ' + f(y + 2) + 'A6.5 6.5 0 0 1 ' + f(x + 6.5) + ' ' + f(y + 2) + 'Z', '#DDEFB8', st('#4E8A34', 1.6));
+          else out += cherryTom(x, y, 5.4);
+        }
+      }
+      for (k = 0; k < 7; k++) { var p = inEllipse(rand, 105, 120, 34, 26, true); out += olive(p[0], p[1] - 4, 3.3); }
+      out += cube(100, 158, 9, '#F5C842', 0) + cube(110, 158, 9, '#F5C842', 0);
+      out += star(105, 46, 11, '#F5C842', st('#D9A441', 1.4));
+      return out;
+    },
+    'butter-board': function () {
+      var rand = rng(211), out = board(18, 72, 180, 82);
+      out += P('M34 104q10-20 34-14t34 4 36-6 40 8 22 20-6 30-36 6-40 4-38 6-32-12-14-26z', '#FBE7A6');
+      out += P('M44 108q22-14 44-4t44-2 40 6M48 124q24-12 48-2t46-2 34 4', 'none', st('#EFD07A', 2.6));
+      out += P('M50 100q14 10 28 0t28 0 28 0 28 0 22 2', 'none', st('#E0A52A', 2.2) + ' opacity=".9"');
+      for (var k = 0; k < 9; k++) { var p = inEllipse(rand, 106, 116, 62, 18); out += C(p[0], p[1], 2.8, '#B3243A') + C(p[0] - 0.8, p[1] - 0.8, 0.8, 'rgba(255,255,255,.6)'); }
+      for (k = 0; k < 7; k++) { p = inEllipse(rand, 106, 116, 58, 16); out += P('M' + f(p[0] - 4) + ' ' + f(p[1]) + 'q2-4 5-2q3-3 4 1q1 4-4 4q-4 1-5-3z', '#9A6236'); }
+      for (k = 0; k < 14; k++) { p = inEllipse(rand, 106, 116, 60, 18); out += P('M' + f(p[0]) + ' ' + f(p[1]) + 'l3-2', 'none', st('#4F7F3A', 1.4)); }
+      for (k = 0; k < 18; k++) { p = inEllipse(rand, 106, 116, 60, 18); out += C(p[0], p[1], 0.9, k % 2 ? '#FFFFFF' : '#F2C230'); }
+      function slice(x, y, a) { return G('translate(' + x + ' ' + y + ') rotate(' + a + ')', E(0, 0, 13, 9, '#C98A3C') + E(0, -0.5, 11, 7.2, '#F6DEA8') + C(-3, -1, 1, '#E2BE7A') + C(3, 1.5, 1, '#E2BE7A')); }
+      out += slice(36, 160, -10) + slice(58, 164, 6) + slice(80, 162, -4) + slice(216, 150, 20);
+      return out;
+    },
+    'wreath': function () {
+      var rand = rng(221), out = plateTop(120, 104, 102, 66), n = 46;
+      out += E(120, 104, 64, 42, 'none', st('#6FA34A', 16) + ' opacity=".55"');
+      for (var k = 0; k < n; k++) {
+        var a = k / n * Math.PI * 2, rr = k % 2 ? 1.1 : 0.9, x = 120 + Math.cos(a) * 62 * rr, y = 104 + Math.sin(a) * 41 * rr;
+        out += leaf(x + rand() * 6 - 3, y + rand() * 6 - 3, 11, 4.4, a * 57.3 + 60 + rand() * 40, k % 3 ? '#5E9E3C' : '#3F7A2E');
+      }
+      for (k = 0; k < 8; k++) { var b = k / 8 * Math.PI * 2 + 0.2; out += rosemary(120 + Math.cos(b) * 50, 104 + Math.sin(b) * 33, 16, b * 57.3 + 90); }
+      for (k = 0; k < 18; k++) {
+        a = k / 18 * Math.PI * 2 + 0.1; x = 120 + Math.cos(a) * (62 + (k % 2 ? 5 : -5)); y = 104 + Math.sin(a) * (41 + (k % 2 ? 3 : -3));
+        out += k % 2 ? cherryTom(x, y, 6) : C(x, y + 1.2, 6.6, 'rgba(0,0,0,.18)') + C(x, y, 6.6, '#FFFDF5', st('#D8CFBC', 1)) + C(x - 2, y - 2, 1.8, '#FFFFFF');
+        if (k % 3 === 0) out += leaf(x + 6, y - 5, 5, 3, 30, '#2F7A2E');
+      }
+      return out;
+    },
+    'tart-trees': function () {
+      var rand = rng(231), out = plateSide(120, 142, 104, 28);
+      function tart(x, y) {
+        var o = P('M' + (x - 20) + ' ' + y + 'L' + (x - 14) + ' ' + (y + 20) + 'H' + (x + 14) + 'L' + (x + 20) + ' ' + y + 'Z', '#D7A056');
+        for (var k = -3; k <= 3; k++) o += P('M' + (x + k * 5.6) + ' ' + y + 'l' + (k * -0.9) + ' 20', 'none', st('#B97E3A', 1.3));
+        o += E(x, y, 20, 5.5, '#C58A44') + E(x, y - 1, 17, 4, '#F08A64');
+        for (k = 0; k < 5; k++) o += E(x, y - 4 - k * 7, 15 - k * 2.9, 4.2, k % 2 ? '#9CCB7E' : '#86BC66') + P('M' + f(x - 13 + k * 2.9) + ' ' + f(y - 4 - k * 7) + 'q' + f(13 - k * 2.9) + ' 4 ' + f(26 - k * 5.8) + ' 0', 'none', st('#6FA352', 1.2));
+        for (k = 0; k < 5; k++) { var p = inEllipse(rand, x, y - 16, 9, 12); o += C(p[0], p[1], 1.8, '#E8482C') + C(p[0] - 0.5, p[1] - 0.6, 0.5, '#FFFFFF'); }
+        return o;
+      }
+      out += tart(84, 92) + tart(156, 92) + tart(56, 120) + tart(120, 122) + tart(184, 120);
+      return out;
+    },
+    'snowmen': function () {
+      var rand = rng(241), out = plateSide(120, 148, 104, 26);
+      function man(x, y, s) {
+        var o = '';
+        o += dill(x - 13 * s, y - 24 * s, 0.7 * s, -60) + dill(x + 13 * s, y - 24 * s, 0.7 * s, 60);
+        o += C(x, y - 14 * s, 16 * s, '#FFF9EC') + C(x, y - 39 * s, 11 * s, '#FFF9EC');
+        for (var k = 0; k < 16; k++) { var p = inEllipse(rand, x, y - 14 * s, 13 * s, 13 * s); o += C(p[0], p[1], 0.8, '#F1DFA8'); }
+        for (k = 0; k < 8; k++) { p = inEllipse(rand, x, y - 39 * s, 8 * s, 8 * s); o += C(p[0], p[1], 0.7, '#F1DFA8'); }
+        o += C(x - 4 * s, y - 42 * s, 1.7 * s, '#2A2420') + C(x + 4 * s, y - 42 * s, 1.7 * s, '#2A2420');
+        o += P('M' + f(x) + ' ' + f(y - 39 * s) + 'l' + f(9 * s) + ' ' + f(1.5 * s) + 'l' + f(-9 * s) + ' ' + f(2.5 * s) + 'z', '#EE8A3A');
+        o += P('M' + f(x - 8 * s) + ' ' + f(y - 48 * s) + 'A' + f(8 * s) + ' ' + f(7 * s) + ' 0 0 1 ' + f(x + 8 * s) + ' ' + f(y - 48 * s) + 'Z', '#2B2622') + C(x, y - 52 * s, 1.6 * s, '#4A3A30');
+        return o;
+      }
+      out += man(76, 140, 0.95) + man(164, 140, 0.95) + man(120, 150, 1.12);
+      return out;
+    },
+    'shuba-cups': function () {
+      var mayo = '#FFF8E7';
+      function cup(x, b, w, h) {
+        return glassCup(x, b, w, h, [[h * 0.2, '#C9B2A4', mayo], [h * 0.18, '#F4E4B0', mayo], [h * 0.16, '#EE8A3A', mayo], [h * 0.14, '#FBF2D0', mayo], [h * 0.2, '#8A2650']],
+          function (y) { return C(x, y - 1, 4, mayo) + P('M' + (x - 8) + ' ' + (y - 2) + 'l3-2M' + (x + 5) + ' ' + y + 'l3-2M' + (x - 2) + ' ' + (y + 1) + 'l2-3', 'none', st('#5DAA45', 1.8)); });
+      }
+      return cup(70, 140, 46, 70) + cup(170, 140, 46, 70) + cup(120, 158, 54, 84);
+    },
+    'olivier-rolls': function () {
+      var rand = rng(251), out = plateTop(120, 108, 102, 62);
+      var colors = [COL.potato, '#E8A09A', COL.carrot, COL.egg, COL.pickle];
+      function roll(x, y) {
+        var o = E(x + 2, y + 15, 17, 7, 'rgba(0,0,0,.1)');
+        o += R(x - 16, y, 32, 14, 0, '#A9CF7E') + E(x, y + 14, 16, 6, '#A9CF7E');
+        for (var k = -2; k <= 2; k++) o += P('M' + f(x + k * 6.5) + ' ' + f(y + 1) + 'v' + f(14 - Math.abs(k)), 'none', st('#7DAF4E', 1.4));
+        o += E(x, y, 16, 6.5, '#3F7A2E') + E(x, y, 14, 5.2, '#D5ECB0') + E(x, y - 0.5, 12, 4.4, '#F3E3B4');
+        for (k = 0; k < 9; k++) { var p = inEllipse(rand, x, y - 1, 10, 3.6); o += cube(p[0], p[1], 3, colors[k % colors.length], rand() * 30); }
+        o += pea(x + 3, y - 2, 1.6) + P('M' + (x - 5) + ' ' + (y - 3) + 'l2-2M' + (x + 6) + ' ' + (y + 1) + 'l2-2', 'none', st('#4E9A3C', 1.4));
+        return o;
+      }
+      out += roll(84, 80) + roll(124, 76) + roll(164, 84) + roll(66, 110) + roll(108, 112) + roll(150, 116);
+      return out;
+    },
+    'snow-globe': function () {
+      var rand = rng(261), out = plateSide(120, 146, 104, 26);
+      out += P('M48 142A72 70 0 0 1 192 142Z', '#FBFBF7') + P('M140 76A72 70 0 0 1 192 142H160A60 66 0 0 0 140 76Z', '#E3E9EF') +
+        P('M48 142A72 70 0 0 1 192 142', 'none', st('#C9D3DC', 2));
+      out += E(120, 142, 72, 7, '#E9EDF0');
+      for (var k = 0; k < 120; k++) { var a = rand() * Math.PI, u = Math.sqrt(rand()); var x = 120 + Math.cos(a) * 68 * u, y = 142 - Math.sin(a) * 66 * u; out += E(x, y, 2.2, 0.9, k % 3 ? '#EDE9DF' : '#FFFFFF', rot(rand() * 180, x, y)); }
+      for (k = 0; k < 22; k++) { a = 0.35 + rand() * 2.4; u = 0.25 + rand() * 0.7; x = 120 + Math.cos(a) * 66 * u; y = 142 - Math.sin(a) * 64 * u; out += C(x, y, 2.5, '#C0213A') + C(x - 0.7, y - 0.8, 0.7, 'rgba(255,255,255,.7)'); }
+      out += dill(112, 78, 1.2, -20) + dill(126, 77, 1.1, 18) + dill(84, 110, 0.9, -50) + dill(160, 112, 0.9, 50);
+      return out;
+    },
+    'persimmon': function () {
+      var rand = rng(271), out = plateTop(120, 104, 102, 66);
+      for (var k = 0; k < 22; k++) { var p = inEllipse(rand, 120, 104, 62, 38); out += leaf(p[0], p[1], 10, 3.6, rand() * 180, k % 2 ? '#5E9E3C' : '#467F30'); }
+      function wedge(x, y, a) { return G('translate(' + f(x) + ' ' + f(y) + ') rotate(' + f(a) + ')', P('M-15 0A15 11 0 0 1 15 0Q0 5-15 0Z', '#F08A24') + P('M-12 0A12 7.5 0 0 1 12 0Q0 3-12 0Z', '#F8A84A') + P('M-12-1q12-5 24 0', 'none', st('#C8641A', 1.5))); }
+      function cheese(x, y, a) { return G('translate(' + f(x) + ' ' + f(y) + ') rotate(' + f(a) + ')', R(-12, -7, 24, 14, 4, '#F2D58A') + P('M-8-5v10M-2-5v10M4-5v10', 'none', st('#C98A3A', 2.2)) + R(-12, -7, 24, 14, 4, 'none', st('#E0B762', 1))); }
+      out += wedge(88, 88, -20) + wedge(150, 92, 25) + wedge(118, 124, 5) + wedge(70, 116, 40);
+      out += cheese(120, 92, 10) + cheese(158, 118, -20) + cheese(90, 106, -35);
+      for (k = 0; k < 7; k++) { p = inEllipse(rand, 120, 104, 48, 28); out += P('M' + f(p[0] - 3) + ' ' + f(p[1]) + 'q1-4 4-2q3-2 3 2t-4 3q-3 0-3-3z', '#8A5A30'); }
+      out += P('M80 98q10 6 20 0t20 0 20 0M96 130q12-5 24 0t24 0', 'none', st('#5A2E1A', 1.4) + ' opacity=".7"');
+      return out;
+    },
+    'accordion': function () {
+      var out = shadow(122, 158, 100, 9);
+      out += R(18, 66, 208, 90, 18, '#F4F1EA') + R(26, 72, 192, 78, 13, '#E9C49A') + R(26, 72, 192, 10, 6, 'rgba(255,255,255,.3)');
+      function fillet(cx, cy, a) {
+        var o = E(0, 3, 68, 19, 'rgba(120,60,20,.25)') + E(0, 0, 68, 19, '#E7B27E') + E(0, -3, 64, 15, '#F1C894');
+        for (var k = -5; k <= 5; k++) {
+          var x = k * 11;
+          o += k % 2 ? E(x, -4, 3.4, 12, '#D9412F') + E(x, -4, 2, 9.5, '#F06A50') : E(x, -5, 3.6, 13, '#F7D35A') + E(x - 1, -8, 1.6, 6, '#FCE8A0');
+        }
+        o += C(-40, 6, 1.2, '#4E8A34') + C(10, 8, 1.2, '#4E8A34') + C(34, 5, 1.2, '#4E8A34') + C(-12, 9, 1, '#B5542A');
+        return G('translate(' + cx + ' ' + cy + ') rotate(' + a + ')', o);
+      }
+      out += fillet(118, 94, -4) + fillet(126, 128, 3);
+      out += steam(96, 58, 3);
+      return out;
+    },
+    'potato-tree': function () {
+      var rand = rng(281), out = shadow(116, 168, 80, 7) + R(34, 34, 164, 136, 4, '#F6EEDC', rot(-2, 116, 102));
+      var rows = 8, top = 56, bot = 146;
+      for (var k = rows - 1; k >= 0; k--) {
+        var y = bot - k * (bot - top) / (rows - 1), hw = 56 * (1 - k / (rows + 0.4)), n = Math.max(1, Math.round(hw * 2 / 10) + 1);
+        for (var j = 0; j < n; j++) {
+          var x = 114 - hw + (n === 1 ? hw : j * hw * 2 / (n - 1));
+          out += C(x, y, 8, '#C98432') + C(x, y - 1, 7, '#E9B65A') + C(x - 1, y - 2, 4.2, '#F4D48A');
+        }
+      }
+      out += C(108, 158, 7, '#C98432') + C(108, 157, 6, '#E9B65A') + C(120, 158, 7, '#C98432') + C(120, 157, 6, '#E9B65A');
+      for (k = 0; k < 26; k++) { var p = inEllipse(rand, 114, 112, 40, 40); if (Math.abs(p[0] - 114) < (p[1] - 50) * 0.6) out += C(p[0], p[1], 1.2, '#FFF1B8'); }
+      var toys = [[100, 130], [130, 122], [112, 104], [92, 146], [138, 142], [120, 84]];
+      toys.forEach(function (t) { out += P('M' + (t[0] - 4) + ' ' + t[1] + 'A4 4 0 0 1 ' + (t[0] + 4) + ' ' + t[1] + 'Z', '#D9412F') + E(t[0], t[1], 4, 1.4, '#F07A5E'); });
+      out += star(114, 46, 11, '#D9412F', st('#A82A1C', 1.2));
+      out += rosemary(160, 156, 22, -30) + rosemary(56, 70, 18, 200);
+      return out;
+    },
+    'wellington': function () {
+      var out = board(16, 100, 180, 60);
+      function parcel(x, y, s) {
+        var o = E(x, y + 14 * s, 30 * s, 7 * s, 'rgba(0,0,0,.12)');
+        o += P('M' + f(x - 30 * s) + ' ' + f(y + 12 * s) + 'Q' + f(x - 30 * s) + ' ' + f(y - 22 * s) + ' ' + f(x) + ' ' + f(y - 22 * s) + 'Q' + f(x + 30 * s) + ' ' + f(y - 22 * s) + ' ' + f(x + 30 * s) + ' ' + f(y + 12 * s) + 'Z', '#D38C38');
+        o += P('M' + f(x - 24 * s) + ' ' + f(y + 4 * s) + 'Q' + f(x - 24 * s) + ' ' + f(y - 18 * s) + ' ' + f(x) + ' ' + f(y - 18 * s) + 'Q' + f(x + 24 * s) + ' ' + f(y - 18 * s) + ' ' + f(x + 24 * s) + ' ' + f(y + 4 * s) + 'Z', '#E8B25A');
+        for (var k = -2; k <= 2; k++) o += P('M' + f(x + k * 8 * s - 8 * s) + ' ' + f(y + 4 * s) + 'l' + f(16 * s) + ' ' + f(-20 * s), 'none', st('#B8742A', 1.4)) + P('M' + f(x + k * 8 * s + 8 * s) + ' ' + f(y + 4 * s) + 'l' + f(-16 * s) + ' ' + f(-20 * s), 'none', st('#B8742A', 1.4));
+        return o + P('M' + f(x - 3 * s) + ' ' + f(y - 17 * s) + 'h' + f(6 * s), 'none', st('#8A5020', 2));
+      }
+      out += parcel(64, 118, 0.95) + parcel(118, 112, 0.95);
+      // разрезанный: тесто, грибы, розовое мясо
+      var x = 160, y = 132;
+      out += E(x, y + 12, 30, 6, 'rgba(0,0,0,.12)') + R(x - 28, y - 22, 56, 36, 16, '#D38C38') + R(x - 24, y - 18, 48, 28, 12, '#F0CC86') +
+        R(x - 20, y - 14, 40, 21, 9, '#5E4630') + R(x - 16, y - 10, 32, 14, 6, '#7A3A2A') + R(x - 13, y - 8, 26, 10, 5, '#D8706A') + R(x - 8, y - 6, 16, 6, 3, '#E99A92');
+      out += parsley(46, 150, 0.8) + parsley(188, 108, 0.8);
+      return out;
+    },
+    'ginger-house': function () {
+      var rand = rng(291), out = plateSide(122, 152, 104, 24), ic = st('#FFFFFF', 2.2);
+      out += P('M152 146V108L184 98V136Z', '#A9662E') + P('M158 112h20v14h-20z', '#F6D58A') + P('M168 112v14M158 119h20', 'none', st('#A9662E', 1.6));
+      out += P('M88 146V108L120 82L152 108V146Z', '#C47A3A');
+      out += R(113, 122, 14, 24, 6, '#8A4E22') + R(113, 122, 14, 24, 6, 'none', ic) + C(124, 134, 1.3, '#F2C230');
+      out += R(94, 114, 13, 12, 2, '#F6D58A') + R(133, 114, 13, 12, 2, '#F6D58A') + P('M100.5 114v12M94 120h13M139.5 114v12M133 120h13', 'none', st('#C47A3A', 1.4)) +
+        R(94, 114, 13, 12, 2, 'none', ic) + R(133, 114, 13, 12, 2, 'none', ic);
+      out += P('M118 80L150 70L190 96L156 112Z', '#B36A30') + P('M128 84l32 18M138 80l32 18M148 76l32 18', 'none', st('#FFFFFF', 1.6) + ' opacity=".8"');
+      out += P('M84 110L120 80L156 110', 'none', st('#FFFDF6', 5)) + P('M118 80L150 70', 'none', st('#FFFDF6', 5)) + P('M156 112L190 96', 'none', st('#FFFDF6', 4));
+      var d = '';
+      for (var k = 0; k < 7; k++) { var t = k / 6, x = 158 + 30 * t, y = 113 - 15 * t; d += 'M' + f(x) + ' ' + f(y) + 'l1.5 ' + (4 + (k % 2) * 3); }
+      out += P(d, 'none', st('#FFFFFF', 2));
+      var cols = [COL.red, '#2E8A4E', COL.gold, '#3E6E9E', '#E86AA0'];
+      for (k = 0; k < 9; k++) { t = rand(); out += C(124 + 52 * t + rand() * 4, 88 + 16 * t + rand() * 6, 2.4, cols[k % 5]); }
+      out += C(120, 92, 3, COL.red) + C(97, 140, 2.4, cols[1]) + C(144, 140, 2.4, cols[2]);
+      for (k = 0; k < 40; k++) { var p = inEllipse(rand, 122, 150, 92, 18); out += C(p[0], p[1], 1 + rand(), '#FFFFFF'); }
+      return out;
+    },
+    'buche': function () {
+      var rand = rng(301), out = plateSide(116, 150, 110, 24);
+      out += R(36, 94, 152, 50, 24, '#5A3320') + R(36, 94, 152, 12, 8, '#6E4028');
+      for (var k = 0; k < 7; k++) { var y = 100 + k * 6.5; out += P('M' + (44 + (k % 2) * 8) + ' ' + y + 'q20 ' + (k % 2 ? 3 : -3) + ' 40 0t40 0 40 0 20 1', 'none', st(k % 2 ? '#3E2214' : '#7A4A2E', 1.6)); }
+      // срез с завитком
+      out += E(184, 119, 13, 25, '#4A2A1A') + E(184, 119, 11, 22, '#7A4A2E');
+      var d = '';
+      for (var a = 0; a <= 16; a += 0.3) { var r = 1 + a * 0.62; d += (a ? 'L' : 'M') + f(184 + Math.cos(a) * r * 0.5) + ' ' + f(119 + Math.sin(a) * r); }
+      out += P(d, 'none', st('#FBF1DC', 2.4));
+      // сучок
+      out += R(88, 74, 24, 24, 4, '#5A3320') + E(100, 74, 12, 5, '#7A4A2E') + P('M95 74q5-3 10 0t-5 2', 'none', st('#FBF1DC', 1.6));
+      // грибочки из безе
+      function mush(x, y, s) { return R(x - 3 * s, y - 10 * s, 6 * s, 11 * s, 2.5 * s, '#FBF4E6') + P('M' + f(x - 10 * s) + ' ' + f(y - 9 * s) + 'Q' + f(x) + ' ' + f(y - 24 * s) + ' ' + f(x + 10 * s) + ' ' + f(y - 9 * s) + 'Z', '#FFF8EE', st('#EADCC6', 1)) + C(x - 3 * s, y - 15 * s, 1, '#E7D6BC') + C(x + 3 * s, y - 13 * s, 0.9, '#E7D6BC'); }
+      out += mush(50, 160, 1.5) + mush(74, 164, 1.2) + mush(198, 158, 1.4);
+      for (k = 0; k < 70; k++) { var x = 40 + rand() * 148, y2 = 94 + rand() * rand() * 30; out += C(x, y2, 0.7 + rand() * 0.8, 'rgba(255,255,255,.95)'); }
+      return out;
+    },
+    'jar-dessert': function () {
+      var rand = rng(311);
+      function jar(x, b, w, h) {
+        var o = glassCup(x, b, w, h, [[h * 0.16, '#D9A867'], [h * 0.2, '#FFF8EE'], [h * 0.1, '#9E1B32'], [h * 0.14, '#D9A867'], [h * 0.18, '#FFF8EE'], [h * 0.06, '#9E1B32']],
+          function (y) { return C(x - 6, y - 3, 4.2, '#8E1230') + C(x + 5, y - 2, 4.2, '#A0183A') + C(x - 7, y - 4, 1.1, 'rgba(255,255,255,.6)') + C(x + 4, y - 3, 1.1, 'rgba(255,255,255,.6)'); }, { r: 9 });
+        for (var k = 0; k < 10; k++) o += C(x - w / 2 + 6 + rand() * (w - 12), b - 4 - rand() * h * 0.14, 0.9, '#A97A40');
+        o += R(x - w / 2 - 2, b - h - 6, w + 4, 8, 3, 'rgba(201,217,224,.9)');
+        return o;
+      }
+      var out = jar(78, 150, 54, 92) + jar(156, 156, 58, 98);
+      out += G('rotate(-30 206 150)', R(178, 147, 40, 5, 2.5, '#C9CDD2') + E(224, 149.5, 8, 5, '#C9CDD2'));
+      return out;
+    },
+    'mandarin-tiramisu': function () {
+      var rand = rng(321), out = plateSide(108, 146, 96, 26);
+      var x0 = 58, x1 = 148, top = 86, bot = 140;
+      var layers = [[13, '#F2B25C'], [13, '#FFF6E6'], [12, '#EFA850'], [13, '#FFF6E6']], y = bot;
+      layers.forEach(function (l) { out += R(x0, y - l[0], x1 - x0, l[0], 0, l[1]); y -= l[0]; });
+      out += P('M' + x0 + ' ' + y + 'L' + (x0 + 22) + ' ' + (y - 20) + 'H' + (x1 + 22) + 'L' + x1 + ' ' + y + 'Z', '#FFF3E0');
+      out += P('M' + x1 + ' ' + y + 'L' + (x1 + 22) + ' ' + (y - 20) + 'V' + (bot - 20) + 'L' + x1 + ' ' + bot + 'Z', '#EBDDC2');
+      for (var k = 0; k < 40; k++) { var t = rand(); out += P('M' + f(x0 + 22 * t + rand() * (x1 - x0)) + ' ' + f(y - 20 * t) + 'l2 -1', 'none', st('#4A2816', 1.3)); }
+      function seg(sx, sy, a) { return G('translate(' + sx + ' ' + sy + ') rotate(' + a + ')', P('M-8 0A8 6 0 0 1 8 0Q0 4-8 0Z', '#F59A2E') + P('M-5-2q5-3 10 0', 'none', st('#FFD08A', 1.2))); }
+      out += seg(86, y - 8, -10) + seg(106, y - 12, 15) + seg(126, y - 8, -5);
+      out += mandarin(196, 132, 15) + mandarin(176, 152, 10);
+      return out;
+    },
+    'snowballs': function () {
+      var rand = rng(331), out = plateSide(120, 146, 104, 26);
+      function ball(x, y, r) {
+        var o = E(x + 2, y + r - 2, r, 3.5, 'rgba(0,0,0,.08)') + C(x, y, r, '#FFFDF8') + C(x + r * 0.3, y + r * 0.3, r * 0.7, '#F1ECE2', ' opacity=".7"');
+        for (var k = 0; k < 18; k++) { var p = inEllipse(rand, x, y, r - 2, r - 2); o += P('M' + f(p[0]) + ' ' + f(p[1]) + 'l2.4 ' + f(rand() * 2 - 1), 'none', st(k % 2 ? '#E6DFD0' : '#FFFFFF', 1.2)); }
+        return o;
+      }
+      out += ball(70, 112, 15) + ball(104, 104, 15) + ball(138, 106, 15) + ball(172, 114, 15) + ball(88, 132, 15) + ball(124, 134, 15);
+      // разрезанный снежок
+      out += C(164, 136, 14, '#FFFDF8') + C(164, 136, 11, '#4A2816') + C(161, 133, 3, '#6B3E26');
+      return out;
+    },
+    'mulled': function () {
+      var rand = rng(341), out = '';
+      out += mug(108, 156, 70, 86, 'rgba(214,236,244,.65)', '#A3243A', function (y) {
+        return citrusSlice(84, y - 2, 13);
+      });
+      out += R(78, 82, 60, 70, 8, '#8E1B2E', ' opacity=".85"');
+      out += R(77, 78, 4, 66, 2, 'rgba(255,255,255,.5)');
+      out += G('rotate(-18 128 60)', R(124, 34, 8, 52, 3, '#8A4A22') + P('M126 38v44M130 38v44', 'none', st('#B0703A', 1)));
+      out += steam(96, 58, 2);
+      out += star(176, 150, 10, '#6B3A1E', '', 0.38) + C(176, 150, 2.5, '#9A5A2E');
+      out += citrusSlice(42, 152, 13) + C(200, 162, 2, '#4A2A1A') + C(192, 166, 2, '#4A2A1A') + C(206, 168, 2, '#4A2A1A');
+      for (var k = 0; k < 3; k++) out += C(84 + rand() * 40, 120 + rand() * 25, 1.4, 'rgba(255,255,255,.35)');
+      return out;
+    },
+    'cocoa-bombs': function () {
+      var out = '';
+      out += mug(118, 156, 74, 72, '#C0392B', '#7A4A2E', function (y) {
+        return R(98, y - 6, 9, 8, 2, '#FFFFFF', rot(12, 102, y - 2)) + R(112, y - 7, 9, 8, 2, '#FFF4F0', rot(-8, 116, y - 3)) + R(126, y - 5, 9, 8, 2, '#FFFFFF', rot(20, 130, y - 1));
+      });
+      out += P('M86 112h64', 'none', st('rgba(255,255,255,.35)', 4)) + C(100, 130, 3, '#FFFFFF', ' opacity=".7"') + C(118, 134, 3, '#FFFFFF', ' opacity=".7"') + C(136, 130, 3, '#FFFFFF', ' opacity=".7"');
+      out += steam(102, 66, 2);
+      function bomb(x, y, r) {
+        return E(x, y + r - 2, r * 0.9, 4, 'rgba(0,0,0,.15)') + C(x, y, r, '#6B3E26') + C(x - r * 0.35, y - r * 0.35, r * 0.28, 'rgba(255,255,255,.3)') +
+          P('M' + f(x - r * 0.8) + ' ' + f(y - r * 0.3) + 'q' + f(r * 0.4) + ' ' + f(r * 0.5) + ' ' + f(r * 0.8) + ' 0t' + f(r * 0.8) + ' 0', 'none', st('#F7E6D2', 2.2));
+      }
+      out += bomb(44, 142, 20) + bomb(198, 146, 16);
+      return out;
+    },
+    'lemonade': function () {
+      var rand = rng(351), out = shadow(104, 162, 52, 7);
+      out += P('M64 60h70l-6 10q14 30 12 60-2 26-36 28-34-2-36-28-2-30 12-60z', 'rgba(214,236,244,.6)');
+      out += P('M58 100q-1 15 2 30 2 26 36 28 34-2 36-28 2-15 1-30z', '#F7B04A', ' transform="translate(5 0)"');
+      out += P('M140 76q22 4 18 30t-20 26', 'none', st('#B9D3DD', 5));
+      out += citrusSlice(84, 128, 11) + citrusSlice(116, 138, 10);
+      for (var k = 0; k < 4; k++) { var x = 72 + k * 15, y = 106 + (k % 2) * 6; out += R(x, y, 12, 12, 2, 'rgba(255,255,255,.65)', rot(rand() * 40, x + 6, y + 6)); }
+      for (k = 0; k < 10; k++) out += C(74 + rand() * 54, 116 + rand() * 36, 1.2, 'rgba(255,255,255,.75)');
+      out += leaf(86, 96, 8, 4, -30, '#3E8A35') + leaf(98, 92, 8, 4, 20, '#4E9A3C');
+      out += P('M64 60h70l-6 10q14 30 12 60-2 26-36 28-34-2-36-28-2-30 12-60z', 'none', st('#A9C9D6', 2));
+      out += R(68, 66, 4, 70, 2, 'rgba(255,255,255,.55)');
+      out += glassCup(182, 158, 38, 56, [[44, '#F7B04A']], function (y) { return citrusSlice(196, y - 2, 9) + leaf(176, y - 3, 6, 3, -20, '#3E8A35'); });
+      return out;
     }
+
   };
 
   /* ---------- Разделы ---------- */
@@ -543,6 +885,24 @@
       out += P('M30 156l10-16 10 16h-6l6 9H30l6-9z', '#B86E33') + P('M34 152h12M32 162h16', 'none', st('#FFFFFF', 1.6));
       return frame(BG.sweets, 'Сладкое', out, 6);
     },
+    trendy: function () {
+      var rand = rng(361), out = board(14, 92, 120, 72);
+      // ёлка из закусок на доске
+      for (var k = 0; k < 5; k++) {
+        var y = 152 - k * 13, hw = 36 * (1 - k / 5.4), n = Math.max(1, Math.round(hw * 2 / 11) + 1);
+        for (var j = 0; j < n; j++) {
+          var x = 72 - hw + (n === 1 ? hw : j * hw * 2 / (n - 1));
+          out += [cube(x, y, 8.5, '#F5C842', 0), C(x, y, 5.2, '#B03A3A') + C(x - 1.5, y - 1, 0.9, '#F2C9BC'), P('M' + f(x - 5.5) + ' ' + f(y + 2) + 'A5.5 5.5 0 0 1 ' + f(x + 5.5) + ' ' + f(y + 2) + 'Z', '#DDEFB8', st('#4E8A34', 1.4)), cherryTom(x, y, 4.6)][k % 4];
+        }
+      }
+      out += olive(64, 128, 2.8) + olive(84, 140, 2.8) + olive(72, 110, 2.8) + star(72, 90, 8, '#F5C842', st('#D9A441', 1.2));
+      // кружка какао с маршмеллоу
+      out += mug(176, 156, 52, 56, '#C0392B', '#7A4A2E', function (y) { return R(162, y - 5, 8, 7, 2, '#FFFFFF', rot(12, 166, y - 1)) + R(174, y - 6, 8, 7, 2, '#FFF4F0') + R(186, y - 4, 8, 7, 2, '#FFFFFF', rot(-15, 190, y)); });
+      out += steam(166, 86, 2);
+      out += mandarin(140, 160, 11) + mandarin(222, 160, 9);
+      out += sparkle(30, 40, 9, '#F2C230') + sparkle(130, 56, 6, '#FFFFFF') + sparkle(48, 70, 5, '#F2C230') + sparkle(160, 36, 5, '#F2C230');
+      return frame(BG.trendy, 'Модный стол', out, 8);
+    },
   };
 
   function hero() {
@@ -586,10 +946,8 @@
   function dish(id) {
     if (cache[id]) return cache[id];
     var fn = DISHES[id];
-    var cat = { olivier: 'salads', shuba: 'salads', mimosa: 'salads', crab: 'salads', vinegret: 'salads',
-      'meat-french': 'hot', chicken: 'hot', duck: 'hot', potato: 'hot', buzhenina: 'hot',
-      eggs: 'snacks', tartlets: 'snacks', lavash: 'snacks', sprats: 'snacks', holodets: 'snacks' }[id] || 'sweets';
     var r = (window.NYR_DATA && window.NYR_DATA.RECIPES || []).filter(function (x) { return x.id === id; })[0];
+    var cat = r && BG[r.cat] ? r.cat : 'other';
     var label = r ? r.title : id;
     cache[id] = fn ? frame(BG[cat], label, fn(), id.length * 13 + 1) : frame(BG.other, label, '', 1);
     return cache[id];
