@@ -244,6 +244,7 @@
     menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     cart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2.5l2.2 10.5h10.6L20.5 7H7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="9" cy="19" r="1.8" fill="currentColor"/><circle cx="17" cy="19" r="1.8" fill="currentColor"/></svg>',
     plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
+    zoom: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" fill="currentColor"/></svg>',
     home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7M6 9.5V20h12V9.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>'
@@ -334,6 +335,33 @@
   };
   function dishPhoto(r, size, first) { return photo(r.id, size, r.title, 'dish:' + r.id, first); }
 
+  /* ---------- Фото шагов (проба на оливье) ----------
+     img/photo/steps/full/<id>-<N>.webp (960×720) и img/photo/steps/thumb/<id>-<N>.webp (480×360), N — номер шага. */
+  function stepPhotoNums(r) {
+    var v = r.stepPhotos, out = [];
+    if (typeof v === 'number') for (var n = 1; n <= Math.min(v, r.steps.length); n++) out.push(n);
+    else if (Array.isArray(v)) v.forEach(function (n) { if (n >= 1 && n <= r.steps.length && out.indexOf(n) < 0) out.push(n); });
+    return out;
+  }
+  function stepPhotoSrc(r, k, size) { return PHOTO + 'steps/' + size + '/' + r.id + '-' + (k + 1) + '.webp'; }
+  function stepAlt(r, k) {
+    var t = r.steps[k];
+    if (t.length > 70) t = t.slice(0, 70).replace(/[\s,—–-]+[^\s]*$/, '') + '…';
+    return 'Шаг ' + (k + 1) + ': ' + t;
+  }
+  function stepPhotoButton(r, k) {
+    return '<button class="step-photo" type="button" data-act="step-photo" data-id="' + r.id + '" data-i="' + k + '" aria-label="Открыть фото крупно: шаг ' + (k + 1) + '">' +
+      '<img src="' + stepPhotoSrc(r, k, 'thumb') + '" alt="' + esc(stepAlt(r, k)) + '" width="480" height="360" loading="lazy" decoding="async" onerror="NYR_STEP_PHOTO_FAIL(this)">' +
+      '<span class="step-photo-zoom" aria-hidden="true">' + ICON.zoom + 'Крупнее</span></button>';
+  }
+  // Фото шага не загрузилось — убираем блок фото целиком.
+  window.NYR_STEP_PHOTO_FAIL = function (img) {
+    var b = img.closest ? img.closest('.step-photo') : img.parentNode, li = b && b.parentNode;
+    if (!b || !li) return;
+    li.removeChild(b);
+    li.classList.remove('has-photo');
+  };
+
   function viewHome() {
     setHeader('Новогодний стол', false);
     var n = state.menu.length;
@@ -411,12 +439,16 @@
     setHeader(r.title, true);
     var a = amountOf(r), factor = factorOf(r);
     var done = state.steps[r.id] || [];
+    var withPhoto = stepPhotoNums(r);
     var steps = r.steps.map(function (s, k) {
-      var isDone = done.indexOf(k) >= 0;
-      return '<li><button class="step' + (isDone ? ' done' : '') + '" data-act="step" data-id="' + r.id + '" data-i="' + k + '" aria-pressed="' + isDone + '">' +
+      var isDone = done.indexOf(k) >= 0, ph = withPhoto.indexOf(k + 1) >= 0;
+      // Шаг с фото: текст — кнопка «Сделано» (как у всех шагов), фото — отдельная кнопка «открыть крупно».
+      return '<li class="step-li' + (ph ? ' has-photo' : '') + (isDone ? ' done' : '') + '">' +
+        '<button class="step' + (isDone ? ' done' : '') + '" data-act="step" data-id="' + r.id + '" data-i="' + k + '" aria-pressed="' + isDone + '">' +
         '<span class="step-num">' + (k + 1) + '</span>' +
         '<span class="step-text">' + esc(s) + '</span>' +
-        '<span class="step-done">' + ICON.check + 'Сделано</span></button></li>';
+        '<span class="step-done">' + ICON.check + 'Сделано</span></button>' +
+        (ph ? stepPhotoButton(r, k) : '') + '</li>';
     }).join('');
     var max = r.whole ? MAX_WHOLE : MAX_PEOPLE;
     var label = r.whole ? 'Сколько:' : 'Порций:';
@@ -437,7 +469,8 @@
       '<output class="stepper-val" data-testid="portions">' + a + '</output>' +
       '<button class="round" data-act="por+" data-id="' + r.id + '" aria-label="Больше"' + (a >= max ? ' disabled' : '') + '>+</button></div>' +
       under + ingredientList(r, factor) + '</section>' +
-      '<section class="card"><h2>Как готовить</h2><p class="hint">Нажмите на шаг, когда сделаете его, — он отметится.</p>' +
+      '<section class="card"><h2>Как готовить</h2><p class="hint">Нажмите на шаг, когда сделаете его, — он отметится.' +
+      (withPhoto.length ? ' Нажмите на фото — оно откроется крупно.' : '') + '</p>' +
       '<ol class="steps">' + steps + '</ol>' +
       (done.length ? '<button class="btn btn-link" data-act="steps-reset" data-id="' + r.id + '">Снять все отметки</button>' : '') +
       '</section>' +
@@ -677,6 +710,123 @@
       f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
     }
   });
+  /* ---------- Просмотр фото шага крупно ----------
+     Тёмный фон, фото по центру, текст шага снизу (в альбоме — справа), «✕ Закрыть», стрелки и свайп.
+     Открытие кладёт запись в историю: системная «назад» закрывает просмотр и оставляет на рецепте. */
+  var V = null; // { el, img, r, list: [номера шагов с 0], pos, ret, pushed }
+  function viewerEl() {
+    var el = document.getElementById('viewer');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'viewer'; el.className = 'viewer'; el.hidden = true;
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-labelledby', 'viewer-count');
+    el.innerHTML =
+      '<div class="viewer-stage"><img class="viewer-img" alt=""></div>' +
+      '<div class="viewer-side">' +
+        '<div class="viewer-top"><span id="viewer-count" class="viewer-count"></span>' +
+        '<button class="viewer-btn viewer-close" type="button">\u2715 Закрыть</button></div>' +
+        '<p class="viewer-text"></p>' +
+        '<div class="viewer-nav">' +
+          '<button class="viewer-btn viewer-arrow" type="button" data-dir="-1" aria-label="Предыдущий шаг">\u2039</button>' +
+          '<button class="viewer-btn viewer-arrow" type="button" data-dir="1" aria-label="Следующий шаг">\u203A</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (b && b.classList.contains('viewer-close')) { closeViewer(); return; }
+      if (b && b.hasAttribute('data-dir')) { viewerStep(+b.getAttribute('data-dir')); return; }
+      // Нажатие на тёмный фон (мимо фото, текста и кнопок) закрывает.
+      if (e.target === el || e.target.classList.contains('viewer-stage')) closeViewer();
+    });
+    var sx = 0, sy = 0, st = 0;
+    el.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) { st = 0; return; }
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; st = Date.now();
+    }, { passive: true });
+    el.addEventListener('touchend', function (e) {
+      if (!st || !e.changedTouches.length) return;
+      var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+      st = 0;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { e.preventDefault(); viewerStep(dx < 0 ? 1 : -1); }
+    });
+    el.querySelector('.viewer-img').addEventListener('error', function () {
+      // Большое фото не загрузилось — показываем маленькое; если и его нет — только текст.
+      var img = this, small = stepPhotoSrc(V.r, V.list[V.pos], 'thumb');
+      if (img.getAttribute('src') !== small) img.setAttribute('src', small); else img.hidden = true;
+    });
+    return el;
+  }
+  function showViewerStep() {
+    var r = V.r, k = V.list[V.pos], img = V.img;
+    img.hidden = false;
+    img.setAttribute('src', stepPhotoSrc(r, k, 'full'));
+    img.setAttribute('alt', stepAlt(r, k));
+    V.el.querySelector('.viewer-count').textContent = 'Шаг ' + (k + 1) + ' из ' + r.steps.length;
+    V.el.querySelector('.viewer-text').textContent = r.steps[k];
+    var arrows = V.el.querySelectorAll('.viewer-arrow');
+    arrows[0].disabled = V.pos === 0;
+    arrows[1].disabled = V.pos === V.list.length - 1;
+    V.el.querySelector('.viewer-nav').hidden = V.list.length < 2;
+    // Соседние фото — заранее, чтобы листалось без ожидания.
+    [V.pos - 1, V.pos + 1].forEach(function (p) { if (p >= 0 && p < V.list.length) (new Image()).src = stepPhotoSrc(r, V.list[p], 'full'); });
+  }
+  function openViewer(id, k, from) {
+    var r = rec(id);
+    if (!r) return;
+    // Только шаги, у которых фото есть на странице (не загрузившиеся уже убраны).
+    var list = Array.prototype.map.call(app.querySelectorAll('.step-photo[data-id="' + id + '"]'), function (b) { return +b.getAttribute('data-i'); });
+    if (list.indexOf(k) < 0) return;
+    var el = viewerEl();
+    V = { el: el, img: el.querySelector('.viewer-img'), r: r, list: list, pos: list.indexOf(k), ret: from, pushed: false, ignorePop: false };
+    showViewerStep();
+    el.hidden = false;
+    document.documentElement.classList.add('viewer-open');
+    try { history.pushState(Object.assign({}, history.state || {}, { viewer: true }), ''); V.pushed = true; } catch (e) { /* без истории — закрытие кнопкой */ }
+    el.querySelector('.viewer-close').focus();
+  }
+  function viewerStep(d) {
+    if (!V) return;
+    var p = V.pos + d;
+    if (p < 0 || p >= V.list.length) return;
+    V.pos = p; showViewerStep();
+  }
+  function hideViewer() {
+    var v = V;
+    V = null;
+    v.el.hidden = true;
+    v.img.removeAttribute('src');
+    document.documentElement.classList.remove('viewer-open');
+    // Фокус — на фото того шага, который смотрели последним.
+    var back = app.querySelector('.step-photo[data-id="' + v.r.id + '"][data-i="' + v.list[v.pos] + '"]') || v.ret;
+    if (back && document.contains(back)) back.focus({ preventScroll: false });
+    return v;
+  }
+  function closeViewer() {
+    if (!V) return;
+    var v = hideViewer();
+    if (v.pushed) { viewerSkipPop = true; history.back(); }
+  }
+  var viewerSkipPop = false;
+  // Вызывается из popstate: «назад» при открытом просмотре только закрывает его.
+  function viewerOnPop() {
+    if (viewerSkipPop) { viewerSkipPop = false; return true; }
+    if (V) { hideViewer(); return true; }
+    return false;
+  }
+  document.addEventListener('keydown', function (e) {
+    if (!V) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeViewer(); return; }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); viewerStep(-1); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); viewerStep(1); return; }
+    if (e.key === 'Tab') { // фокус держится внутри просмотра
+      var f = Array.prototype.filter.call(V.el.querySelectorAll('button'), function (b) { return !b.disabled && b.offsetParent !== null; });
+      var i = f.indexOf(document.activeElement);
+      e.preventDefault();
+      if (f.length) f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+    }
+  });
+
   function copyText(text) {
     function done() { toast('Скопировано — вставьте в сообщение'); }
     function fallback() { if (legacyCopy(text)) done(); else showManualCopy(text); }
@@ -750,6 +900,7 @@
       if (arr.length) state.steps[id] = arr; else delete state.steps[id];
       save(); rerender();
     },
+    'step-photo': function (el) { openViewer(el.getAttribute('data-id'), +el.getAttribute('data-i'), el); },
     'steps-reset': function (el) { delete state.steps[el.getAttribute('data-id')]; save(); rerender('.step'); },
     'buy-reset': function () { state.bought = dict(); save(); rerender('[data-act="share-shop"]'); },
     'share-recipe': function (el) { var r = rec(el.getAttribute('data-id')); share(r.title, recipeText(r)); },
@@ -793,6 +944,7 @@
   });
   backBtn.addEventListener('click', function () { goBack(); });
   window.addEventListener('popstate', function (e) {
+    if (viewerOnPop()) return;
     render();
     window.scrollTo(0, e.state && e.state.scroll ? e.state.scroll : 0);
   });

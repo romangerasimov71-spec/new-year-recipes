@@ -493,6 +493,94 @@ async function main() {
     await page.close();
   }
 
+  /* ---------- Фото шагов (проба на оливье) ---------- */
+  console.log('\nФото шагов');
+  for (const vp of [{ w: 390, h: 844, t: true }, { w: 320, h: 568, t: true }, { w: 844, h: 390, t: true }, { w: 1280, h: 800, t: false }]) {
+    const name = vp.w + '×' + vp.h;
+    const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, hasTouch: vp.t, isMobile: vp.t });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(base + '#r/olivier');
+    await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+    await page.reload();
+    const sp = await page.evaluate(async () => {
+      const imgs = [...document.querySelectorAll('.step-photo img')];
+      imgs.forEach(i => { i.loading = 'eager'; });
+      await Promise.all(imgs.map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
+      return imgs.map(i => ({ src: i.getAttribute('src'), ok: i.naturalWidth === 480, alt: i.alt, lazy: i.getAttribute('loading') }));
+    });
+    ok(sp.length === 5 && sp.every((x, k) => x.ok && x.src === 'img/photo/steps/thumb/olivier-' + (k + 1) + '.webp' && x.alt.startsWith('Шаг ' + (k + 1) + ': ')), name + ': у оливье 5 фото шагов, грузятся, alt «Шаг N: …»');
+    await layoutCheck(page, name + ' шаги с фото');
+    // Нажатие на фото — открывает просмотр и не отмечает «Сделано».
+    await page.locator('.step-photo').nth(1).click();
+    await page.waitForFunction(() => { const i = document.querySelector('#viewer .viewer-img'); return i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 }).catch(() => {});
+    const v1 = await page.evaluate(() => {
+      const v = document.getElementById('viewer'), img = v.querySelector('.viewer-img');
+      const ir = img.getBoundingClientRect(), tr = v.querySelector('.viewer-text').getBoundingClientRect();
+      const btns = [...v.querySelectorAll('button')].filter(b => b.offsetParent).map(b => b.getBoundingClientRect());
+      return { open: !v.hidden, done: document.querySelectorAll('.step.done').length, count: v.querySelector('.viewer-count').textContent,
+        src: img.getAttribute('src'), focusIn: v.contains(document.activeElement),
+        noOverlap: tr.bottom <= ir.top || tr.top >= ir.bottom || tr.right <= ir.left || tr.left >= ir.right,
+        inView: ir.top >= -1 && ir.bottom <= innerHeight + 1 && ir.width > 100, bigBtns: btns.every(b => b.height >= 48 && b.width >= 48 && b.bottom <= innerHeight + 1 && b.right <= innerWidth + 1) };
+    });
+    ok(v1.open && v1.done === 0 && v1.count === 'Шаг 2 из 5' && /steps\/full\/olivier-2/.test(v1.src) && v1.focusIn, name + ': нажатие на фото открывает крупно «Шаг 2 из 5» и не отмечает «Сделано»');
+    ok(v1.noOverlap && v1.inView && v1.bigBtns, name + ': в просмотре фото целиком, текст не налезает, кнопки крупные и на экране' + (v1.noOverlap && v1.inView && v1.bigBtns ? '' : ' ' + JSON.stringify(v1)));
+    if (vp.w === 390 || vp.w === 844) await page.screenshot({ path: path.join(OUT, 'viewer-' + vp.w + '.png') });
+    // Стрелки.
+    await page.click('#viewer .viewer-arrow[data-dir="1"]');
+    ok((await page.textContent('#viewer .viewer-count')) === 'Шаг 3 из 5', name + ': стрелка › — следующий шаг');
+    await page.keyboard.press('ArrowLeft');
+    ok((await page.textContent('#viewer .viewer-count')) === 'Шаг 2 из 5', name + ': клавиша ← — предыдущий шаг');
+    // Свайп влево — следующий.
+    await page.evaluate(() => {
+      const v = document.getElementById('viewer'), st = v.querySelector('.viewer-stage');
+      const t = (x) => new Touch({ identifier: 1, target: st, clientX: x, clientY: 300 });
+      st.dispatchEvent(new TouchEvent('touchstart', { touches: [t(300)], changedTouches: [t(300)], bubbles: true }));
+      st.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [t(150)], bubbles: true, cancelable: true }));
+    });
+    ok((await page.textContent('#viewer .viewer-count')) === 'Шаг 3 из 5', name + ': свайп влево — следующий шаг');
+    // Фокус держится внутри.
+    for (let i = 0; i < 5; i++) await page.keyboard.press('Tab');
+    ok(await page.evaluate(() => document.getElementById('viewer').contains(document.activeElement)), name + ': Tab не уводит из просмотра');
+    // Escape закрывает, фокус — на фото шага, страница та же.
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    const c1 = await page.evaluate(() => ({ hidden: document.getElementById('viewer').hidden, hash: location.hash, focus: document.activeElement && document.activeElement.getAttribute('data-act') + ':' + document.activeElement.getAttribute('data-i'), done: document.querySelectorAll('.step.done').length }));
+    ok(c1.hidden && c1.hash === '#r/olivier' && c1.focus === 'step-photo:2' && c1.done === 0, name + ': Escape закрывает, фокус на фото шага 3, рецепт на месте (' + c1.focus + ')');
+    // Системная «назад» закрывает просмотр и остаётся на рецепте.
+    await page.locator('.step-photo').nth(0).click();
+    await page.goBack();
+    await page.waitForTimeout(200);
+    const c2 = await page.evaluate(() => ({ hidden: document.getElementById('viewer').hidden, hash: location.hash, title: document.querySelector('.page-title').textContent }));
+    ok(c2.hidden && c2.hash === '#r/olivier' && c2.title === 'Оливье', name + ': «назад» закрывает просмотр и остаётся на рецепте');
+    // Нажатие на фон закрывает; потом «назад» уводит с рецепта как обычно (лишних записей в истории нет).
+    await page.locator('.step-photo').nth(4).click();
+    await page.mouse.click(vp.w > vp.h ? 4 : Math.round(vp.w / 2), vp.w > vp.h ? Math.round(vp.h / 2) : 140);
+    await page.waitForTimeout(200);
+    ok(await page.evaluate(() => document.getElementById('viewer').hidden), name + ': нажатие на фон закрывает');
+    // Нажатие на текст шага — по-прежнему «Сделано».
+    await page.locator('.step').nth(0).click();
+    ok(await page.locator('.step.done').count() === 1 && await page.evaluate(() => document.getElementById('viewer').hidden), name + ': нажатие на текст шага отмечает «Сделано», просмотр не открывается');
+    ok(errors.length === 0, name + ': ошибок нет' + (errors.length ? ' ' + JSON.stringify(errors.slice(0, 3)) : ''));
+    await ctx.close();
+  }
+  {
+    // У других рецептов фото шагов нет; если фото шагов не загрузились — блока нет, ошибок нет.
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const jsErrors = []; page.on('pageerror', e => jsErrors.push(e.message));
+    const ids = await (async () => { await page.goto(base); return page.evaluate(() => window.NYR_DATA.RECIPES.filter(r => r.id !== 'olivier').map(r => r.id)); })();
+    let other = 0;
+    for (const id of ids) { await page.goto(base + '#r/' + id); other += await page.locator('.step-photo, .step-li.has-photo').count(); }
+    ok(other === 0, 'у других рецептов блока фото шагов нет');
+    await page.route('**/img/photo/steps/**', r => r.abort());
+    await page.goto(base + '#r/olivier');
+    await page.evaluate(() => document.querySelectorAll('.step-photo img').forEach(i => { i.loading = 'eager'; }));
+    await page.waitForFunction(() => !document.querySelector('.step-photo'), null, { timeout: 5000 }).catch(() => {});
+    const left = await page.evaluate(() => ({ photos: document.querySelectorAll('.step-photo').length, cards: document.querySelectorAll('.step-li.has-photo').length, steps: document.querySelectorAll('.step').length }));
+    ok(left.photos === 0 && left.cards === 0 && left.steps === 5 && jsErrors.length === 0, 'фото шагов не загрузились — блоков фото нет, шаги на месте, ошибок нет');
+    await page.close();
+  }
+
   /* ---------- А13: узкий экран 320 px с полным меню ---------- */
   console.log('\nЭкран 320×568 с полным меню (А13)');
   {

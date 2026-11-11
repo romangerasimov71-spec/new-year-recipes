@@ -253,6 +253,73 @@ svg { display: block; }
 .step.done .step-num { background: var(--green); }
 .step.done .step-done { display: inline-flex; }
 
+/* Шаг с фото: одна карточка — сверху текст (нажатие = «Сделано»), снизу фото (нажатие = открыть крупно). */
+.step-li.has-photo { border: 2px solid var(--line); border-radius: 14px; background: var(--bg); overflow: hidden; }
+.step-li.has-photo .step { border: 0; border-radius: 0; background: transparent; }
+.step-li.has-photo.done { background: var(--green-soft); border-color: #9CC3AA; }
+.step-photo {
+  position: relative; display: block; width: 100%; padding: 0 12px 12px; margin: 0;
+  border: 0; background: transparent; cursor: zoom-in;
+}
+.step-photo img {
+  display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover;
+  border-radius: 10px; background: var(--photo-bg);
+}
+.step-li.done .step-photo img { opacity: .75; }
+.step-photo-zoom {
+  position: absolute; right: 22px; bottom: 22px; display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(30, 20, 14, .72); color: #fff; font-size: 17px; font-weight: 700;
+  border-radius: 999px; padding: 5px 12px 5px 9px;
+}
+.step-photo-zoom svg { width: 20px; height: 20px; }
+
+/* ---------- Просмотр фото шага ---------- */
+html.viewer-open, html.viewer-open body { overflow: hidden; }
+.viewer {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 100; background: #140E0A; color: #fff;
+  display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.viewer[hidden] { display: none; }
+.viewer-stage {
+  flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px;
+}
+.viewer-img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 10px; }
+.viewer-side { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 4px 16px 14px; }
+.viewer-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; order: -1; }
+.viewer-count { font-size: 20px; font-weight: 700; }
+.viewer-text { margin: 0; font-size: 19px; line-height: 1.45; max-height: 30vh; overflow-y: auto; }
+.viewer-nav { display: flex; gap: 12px; }
+.viewer-nav[hidden] { display: none; }
+.viewer-btn {
+  min-height: 56px; min-width: 56px; padding: 6px 18px; border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, .55); background: rgba(255, 255, 255, .12); color: #fff;
+  font-size: 20px; font-weight: 700; line-height: 1;
+}
+.viewer-arrow { flex: 1 1 0; font-size: 40px; padding: 0 0 4px; }
+.viewer-arrow:disabled { opacity: .3; cursor: default; }
+.viewer-btn:active { background: rgba(255, 255, 255, .25); }
+/* Телефон: сверху счётчик и «Закрыть», потом фото, под ним текст и стрелки. */
+.viewer { flex-direction: column; }
+.viewer-side { display: contents; }
+.viewer-top { order: 0; padding: 10px 16px 0; }
+.viewer-stage { order: 1; }
+.viewer-text { order: 2; padding: 0 16px; }
+.viewer-nav { order: 3; padding: 10px 16px 14px; }
+/* Альбом и компьютер: фото слева, справа счётчик, «Закрыть», текст и стрелки — текст не налезает на фото. */
+@media (min-aspect-ratio: 5 / 4) {
+  .viewer { flex-direction: row; }
+  .viewer-stage { order: 0; flex: 1 1 auto; padding: 12px; }
+  .viewer-side { order: 1; display: flex; width: min(38vw, 380px); padding: 12px 16px 12px 4px; justify-content: space-between; }
+  .viewer-top { order: 0; padding: 0; flex-wrap: wrap; }
+  .viewer-text { order: 1; padding: 0; flex: 1 1 auto; max-height: none; }
+  .viewer-nav { order: 2; padding: 0; }
+}
+@media (min-aspect-ratio: 5 / 4) and (max-height: 500px) {
+  .viewer-text { font-size: 18px; }
+  .viewer-top { gap: 8px; }
+}
+
 .tip {
   background: var(--gold-soft); border: 2px solid #EBCB8B; border-radius: var(--radius);
   padding: 14px 16px; margin: 18px 0;
