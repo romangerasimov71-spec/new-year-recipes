@@ -399,3 +399,70 @@ svg { display: block; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* ---------- Фото-сцена рецепта (проба: оливье) — js/photo.js ---------- */
+.thumb-photo { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; background: #3a322c; }
+.r-top.has-photo .r-head { margin-bottom: 4px; }
+.ph { position: relative; margin: 2px 0 8px; }
+.ph.ph-ready:not(.ph-static) .ph-pin { position: -webkit-sticky; position: sticky; top: var(--hdr-h, 70px); z-index: 1; }
+.ph-stage {
+  position: relative; margin: 0 auto; overflow: hidden; isolation: isolate;
+  width: 100%; max-width: 520px;
+  width: min(100%, 520px, calc((var(--vh, 100vh) - var(--hdr-h, 70px) - var(--ph-reserve, 100px)) * .8));
+  border-radius: var(--radius); background: #E6EEDB; box-shadow: var(--shadow);
+  -webkit-user-select: none; user-select: none;
+}
+.ph-stage::before { content: ""; display: block; padding-top: 125%; } /* кадр 4:5 */
+.ph-ready .ph-stage { background: #2B2521; }
+.ph-svg, .ph-layers, .ph-img, .ph-labels, .ph-lines { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.ph-svg svg { width: 100%; height: 100%; overflow: visible; }
+.ph-svg-off .ph-svg { display: none; }
+.ph-layers { opacity: 0; transition: opacity .3s; pointer-events: none; }
+.ph-ready .ph-layers { opacity: 1; }
+.ph-failed .ph-layers, .ph-failed .ph-ctl { display: none !important; }
+.ph-img { display: block; max-width: none; -webkit-user-drag: none; }
+.ph-band { will-change: transform, opacity; backface-visibility: hidden; }
+.ph-done { opacity: 0; will-change: opacity; }
+.ph-labels { will-change: opacity; }
+.ph-lines { overflow: visible; }
+.ph-lines line { stroke: rgba(255, 255, 255, .9); stroke-width: 1.6; }
+.ph-lines circle { fill: #fff; stroke: rgba(30, 20, 15, .7); stroke-width: 1.5; }
+.ph-lbl {
+  position: absolute; left: 0; top: 0; white-space: nowrap;
+  font-size: 17px; line-height: 1.2; font-weight: 700; color: #fff;
+  background: rgba(24, 16, 12, .74); border: 1px solid rgba(255, 255, 255, .4);
+  border-radius: 999px; padding: 3px 10px 4px;
+}
+.ph-hint {
+  position: absolute; left: 7%; right: 7%; bottom: 2.5%; will-change: opacity;
+  font-size: 17px; line-height: 1.3; text-align: center; color: #fff;
+  background: rgba(24, 16, 12, .8); border-radius: 14px; padding: 6px 10px;
+}
+.ph-ctl { display: none; justify-content: center; padding: 10px 0 2px; }
+.ph-ctl.ph-on.ph-ctl-pin { display: flex; }
+.ph-btn { min-width: 230px; font-size: 21px; }
+.ph-side-hint { margin: 10px 0 0; color: var(--muted); }
+/* Сцена слева, название, время и кнопка — справа: телефон в альбоме и компьютер */
+@media (min-width: 600px) and (max-height: 500px), (min-width: 900px) {
+  .r-top.has-photo { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 22px; align-items: start; }
+  .has-photo .ph { grid-column: 1; grid-row: 1; margin: 0; }
+  .has-photo .r-head { grid-column: 2; grid-row: 1; position: -webkit-sticky; position: sticky; top: calc(var(--hdr-h, 56px) + 10px); }
+  .has-photo .page-title { margin-top: 0; }
+  .has-photo .facts { grid-template-columns: 1fr; gap: 2px; }
+  .has-photo .facts li { display: flex; }
+  .has-photo .fact-k { display: inline; min-width: 6.2em; }
+  .ph-hint { display: none; }
+  .ph-ctl.ph-on.ph-ctl-pin { display: none; }
+  .ph-ctl.ph-on.ph-ctl-side { display: block; padding-top: 16px; }
+}
+@media (min-width: 600px) and (max-height: 500px) {
+  .has-photo .ph-stage { width: min(44vw, calc((var(--vh, 100vh) - var(--hdr-h, 56px) - 24px) * .8)); }
+}
+@media (min-width: 900px) {
+  .has-photo .ph-stage { width: min(440px, calc((var(--vh, 100vh) - var(--hdr-h, 70px) - 40px) * .8)); }
+}
+@media (max-width: 360px) {
+  .ph-lbl { padding: 2px 8px 3px; }
+  .ph-hint { left: 4%; right: 4%; padding: 5px 8px; }
+  .ph-btn { min-width: 0; width: 100%; }
+}
