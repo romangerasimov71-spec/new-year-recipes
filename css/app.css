@@ -583,6 +583,7 @@ html.has-banner .toast { bottom: calc(var(--banner-h, 0px) + 16px + env(safe-are
 .app-foot .btn-link { margin: 0; padding: 8px 12px; }
 
 .howmany p { margin: 0 0 8px; }
+.nw { white-space: nowrap; }
 .hm-list { list-style: none; margin: 0; padding: 0; }
 .hm-list li { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .hm-list li:first-child { border-top: 0; }

@@ -877,7 +877,7 @@
     var order = ['salads', 'hot', 'snacks', 'sweets'], parts = [], rows = '', missing = 0;
     order.forEach(function (c) {
       var a = nm[c], w = NORM_WORDS[c];
-      parts.push(rangeText(a) + ' ' + (a[1] === 1 ? w.gen[0] : w.gen[1]));
+      parts.push('<span class="nw">' + rangeText(a) + '\u00a0' + (a[1] === 1 ? w.gen[0] : w.gen[1]) + '</span>');
       var ok = have[c] >= a[0], need = a[0] - have[c];
       if (!ok) missing++;
       rows += '<li class="' + (ok ? 'ok' : 'need') + '">' + (ok ? ICON.check : '<span class="hm-dot" aria-hidden="true"></span>') +
