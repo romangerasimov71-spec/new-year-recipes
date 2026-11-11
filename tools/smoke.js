@@ -47,7 +47,10 @@ function appSize() {
 // Фото блюд считаем отдельно от кода: full (960×720) — до 150 КБ, thumb (480×360) — до 40 КБ каждое.
 const PHOTO_IDS = ['olivier', 'shuba', 'mimosa', 'crab', 'vinegret', 'meat-french', 'chicken', 'duck', 'potato', 'buzhenina',
   'eggs', 'tartlets', 'lavash', 'sprats', 'holodets', 'napoleon', 'sharlotka', 'tiramisu', 'kartoshka', 'gingerbread',
-  'hero', 'cat-salads', 'cat-hot', 'cat-snacks', 'cat-sweets'];
+  'snack-tree', 'butter-board', 'wreath', 'tart-trees', 'snowmen', 'shuba-cups', 'olivier-rolls', 'snow-globe', 'persimmon',
+  'accordion', 'potato-tree', 'wellington', 'ginger-house', 'buche', 'jar-dessert', 'mandarin-tiramisu', 'snowballs',
+  'mulled', 'cocoa-bombs', 'lemonade',
+  'hero', 'cat-salads', 'cat-hot', 'cat-snacks', 'cat-sweets', 'cat-trendy'];
 function photoSizes(sz) {
   return PHOTO_IDS.map(n => { const f = path.join(ROOT, 'img/photo', sz, n + '.webp'); return { n, size: fs.existsSync(f) ? fs.statSync(f).size : -1 }; });
 }
@@ -123,19 +126,18 @@ async function main() {
     const l = photoSizes(sz), sum = l.reduce((s, x) => s + Math.max(0, x.size), 0), max = l.reduce((a, b) => (b.size > a.size ? b : a));
     console.log('Фото ' + sz + ': ' + l.filter(x => x.size > 0).length + ' шт, всего ' + (sum / 1024).toFixed(0) + ' КБ, самое большое ' + max.n + ' ' + (max.size / 1024).toFixed(1) + ' КБ');
     const missing = l.filter(x => x.size < 0).map(x => x.n), big = l.filter(x => x.size > lim * 1024).map(x => x.n);
-    ok(!missing.length && !big.length, 'фото ' + sz + ': все 25 на месте, каждое не больше ' + lim + ' КБ' + (missing.length ? ' нет: ' + missing.join() : '') + (big.length ? ' больше: ' + big.join() : ''));
+    ok(!missing.length && !big.length, 'фото ' + sz + ': все ' + PHOTO_IDS.length + ' на месте, каждое не больше ' + lim + ' КБ' + (missing.length ? ' нет: ' + missing.join() : '') + (big.length ? ' больше: ' + big.join() : ''));
   }
 
   {
     // Фото шагов: у каждого рецепта есть, файлы на месте, лишних файлов нет, full ≤ 150 КБ, thumb ≤ 40 КБ.
     const R = recipeData(), want = [];
     R.forEach(r => stepNums(r).forEach(n => want.push(r.id + '-' + n + '.webp')));
-    // Рецепты с photo: false (пока «Модный стол») — без фото: им stepPhotos не нужен.
-    const withPh = R.filter(r => r.photo !== false), noPh = R.filter(r => r.photo === false);
-    const noPhotos = withPh.filter(r => !stepNums(r).length).map(r => r.id);
-    ok(withPh.length === 20 && !noPhotos.length, 'фото шагов есть у всех ' + withPh.length + ' рецептов с фото' + (noPhotos.length ? ' нет у: ' + noPhotos.join() : ''));
-    const early = noPh.filter(r => stepNums(r).length).map(r => r.id);
-    ok(noPh.length === 20 && !early.length, 'у 20 рецептов без фото (photo: false) нет и фото шагов' + (early.length ? ': ' + early.join() : ''));
+    // У всех 40 рецептов (классика и «Модный стол») — фото блюда и фото каждого шага.
+    const withPh = R.filter(r => r.photo !== false);
+    const noPhotos = R.filter(r => stepNums(r).length !== r.steps.length).map(r => r.id);
+    ok(R.length === 40 && withPh.length === 40, 'у всех ' + R.length + ' рецептов есть фото блюда (нет photo: false)');
+    ok(!noPhotos.length, 'фото шагов у всех 40 рецептов — у каждого шага' + (noPhotos.length ? ' не у всех шагов: ' + noPhotos.join() : ''));
     for (const [sz, lim] of [['full', 150], ['thumb', 40]]) {
       const dir = path.join(ROOT, 'img/photo/steps', sz), have = fs.readdirSync(dir).filter(f => f.endsWith('.webp'));
       const missing = want.filter(f => !have.includes(f)), extra = have.filter(f => !want.includes(f));
@@ -179,7 +181,7 @@ async function main() {
       const withPhoto = D.RECIPES.filter(r => r.photo !== false).map(r => r.id);
       const cat = D.CATEGORIES.find(c => c.id === 'trendy');
       return { n: D.RECIPES.length, perCat, bad, unique: new Set(ids).size === ids.length, ids, withPhoto, also, badAlso, drinks,
-        cat: cat && cat.title + '|' + cat.sub + '|' + !!cat.featured, trPhoto: tr.every(r => r.photo === false) };
+        cat: cat && cat.title + '|' + cat.sub + '|' + !!cat.featured, trPhoto: tr.every(r => r.photo !== false) && cat.photo !== false };
     });
     ok(d.n === 40, 'рецептов 40 (' + d.n + ')');
     ok(['salads', 'hot', 'snacks', 'sweets'].every(c => d.perCat[c] === 5) && d.perCat.trendy === 20 && Object.keys(d.perCat).length === 5, 'по 5 в базовых разделах и 20 в «Модном столе» ' + JSON.stringify(d.perCat));
@@ -187,7 +189,7 @@ async function main() {
     ok(!d.badAlso.length && d.drinks === 'cocoa-bombs,lemonade,mulled', 'модные блюда — ещё и в своём базовом разделе, напитки — только в «Модном столе» ' + JSON.stringify(d.also));
     ok(d.unique, 'id рецептов не повторяются');
     ok(d.bad.length === 0, 'шаги 4–8, совет, картинка, единицы и отделы на месте' + (d.bad.length ? ' ' + JSON.stringify(d.bad) : ''));
-    ok(d.withPhoto.length === 20 && d.withPhoto.every(id => PHOTO_IDS.indexOf(id) >= 0) && d.trPhoto, 'у каждого рецепта с фото оно в списке PHOTO_IDS; у модных пока photo: false');
+    ok(d.withPhoto.length === 40 && d.withPhoto.every(id => PHOTO_IDS.indexOf(id) >= 0) && d.trPhoto, 'у всех 40 рецептов и плашки «Модный стол» фото, все в списке PHOTO_IDS');
     await page.close();
   }
 
@@ -535,7 +537,7 @@ async function main() {
   /* ---------- Фото блюд ---------- */
   console.log('\nФото блюд');
   {
-    // Все страницы с фото: главная, 4 раздела, 20 рецептов, меню; фото загрузились, у рецептов — своё большое фото.
+    // Все страницы с фото: главная, 5 разделов, 40 рецептов, меню; фото загрузились, у рецептов — своё большое фото.
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
@@ -551,7 +553,8 @@ async function main() {
     await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
     await page.reload();
     const home = await loadedAll();
-    ok(home.length === 5 && home.every(i => i.ok), 'главная: праздничный стол и 4 плитки разделов — фото (' + home.length + ')');
+    ok(home.length === 6 && home.every(i => i.ok), 'главная: праздничный стол, плашка «Модный стол» и 4 плитки разделов — фото (' + home.length + ')');
+    ok(home.some(i => i.src === 'img/photo/thumb/cat-trendy.webp' && i.alt === 'Модный стол'), 'плашка «Модный стол» — фото cat-trendy');
     ok(home[0].src === 'img/photo/thumb/hero.webp' && !home[0].lazy, 'главная: праздничный стол — сразу, без отложенной загрузки');
     const seen = new Set(home.map(i => i.src));
     const ids = await page.evaluate(() => window.NYR_DATA.RECIPES.map(r => ({ id: r.id, title: r.title })));
@@ -562,19 +565,16 @@ async function main() {
       await page.goto(base + '#c/' + c);
       const l = await loadedAll(); l.forEach(i => seen.add(i.src));
       const art = await page.locator('.rcard-art svg').count();
-      if (l.length === 5 && l.every(i => i.ok && /thumb/.test(i.src)) && art === await page.locator('.tag-trendy').count()) cats++;
+      const n = await page.locator('.rcard').count();
+      if (l.length === n && l.every(i => i.ok && /thumb/.test(i.src)) && art === 0) cats++;
     }
-    ok(cats === 4, 'разделы: у классических блюд маленькое фото (thumb), у модных — рисунок');
+    ok(cats === 4, 'разделы: у всех блюд (и классических, и модных) маленькое фото (thumb), рисунков нет');
     await page.goto(base + '#c/trendy');
-    ok(await page.locator('.rcard-art svg').count() === 20 && await page.locator('#app img').count() === 0, '«Модный стол»: 20 рисунков, ни одного фото');
+    const trList = await loadedAll(); trList.forEach(i => seen.add(i.src));
+    ok(trList.length === 20 && trList.every(i => i.ok && /thumb/.test(i.src)) && await page.locator('.rcard-art svg').count() === 0, '«Модный стол»: 20 маленьких фото, рисунков нет');
     const noPhoto = [];
-    const trIds = await page.evaluate(() => window.NYR_DATA.RECIPES.filter(r => r.photo === false).map(r => r.id));
-    for (const id of trIds) {
-      await page.goto(base + '#r/' + id);
-      if (await page.locator('.r-hero svg').count() !== 1 || await page.locator('#app img').count() !== 0) noPhoto.push(id);
-    }
-    ok(noPhoto.length === 0, 'модные рецепты: на странице рисунок, пустых рамок и фото нет' + (noPhoto.length ? ' ' + noPhoto.join() : ''));
-    for (const r of ids.filter(x => trIds.indexOf(x.id) < 0)) {
+    const trIds = await page.evaluate(() => window.NYR_DATA.RECIPES.filter(r => r.cat === 'trendy').map(r => r.id));
+    for (const r of ids) {
       await page.goto(base + '#r/' + r.id);
       const l = await loadedAll(); l.forEach(i => seen.add(i.src));
       const big = l.find(i => i.src === 'img/photo/full/' + r.id + '.webp');
@@ -588,11 +588,11 @@ async function main() {
     await page.evaluate(ids => { const s = JSON.parse(localStorage.getItem('nyr.v1')); s.menu = s.menu.concat(ids); localStorage.setItem('nyr.v1', JSON.stringify(s)); }, trIds);
     await page.goto(base + '#shop'); await page.goto(base + '#menu'); await page.reload();
     await loadedAll();
-    ok(await page.locator('.mitem-art svg').count() === 20 && await page.locator('.mitem-art img').count() === 5, 'меню с модными: 5 фото и 20 рисунков');
-    const trReq = requested.filter(u => trIds.some(id => u.indexOf('/' + id + '.webp') >= 0 || u.indexOf('/' + id + '-') >= 0 || u.indexOf('cat-trendy') >= 0));
-    ok(trReq.length === 0, 'нет запросов к несуществующим фото модных блюд и плашки' + (trReq.length ? ' ' + trReq.slice(0, 3).join() : ''));
+    ok(await page.locator('.mitem-art svg').count() === 0 && await page.locator('.mitem-art img').count() === 25, 'меню с модными: 25 фото, рисунков нет');
+    const trReq = requested.filter(u => trIds.some(id => u.indexOf('/' + id + '.webp') >= 0) || u.indexOf('cat-trendy') >= 0);
+    ok(trReq.length > 0, 'фото модных блюд и плашки запрашиваются (' + trReq.length + ')');
     await page.screenshot({ path: path.join(OUT, 'photos-menu.png') });
-    // Все 25 фото (full + thumb) лежат на месте и открываются.
+    // Все фото блюд и плашек (full + thumb) лежат на месте и открываются.
     const all = await page.evaluate(async names => {
       const res = [];
       for (const n of names) for (const sz of ['full', 'thumb']) {
@@ -603,7 +603,7 @@ async function main() {
       return res;
     }, PHOTO_IDS);
     const wrong = all.filter(x => x.n.startsWith('full') ? !(x.w === 960 && x.h === 720) : !(x.w === 480 && x.h === 360));
-    ok(all.length === 50 && wrong.length === 0, 'все 25 фото есть в двух размерах (960×720 и 480×360) и открываются' + (wrong.length ? ' ' + JSON.stringify(wrong.slice(0, 3)) : ''));
+    ok(all.length === 2 * PHOTO_IDS.length && wrong.length === 0, 'все ' + PHOTO_IDS.length + ' фото есть в двух размерах (960×720 и 480×360) и открываются' + (wrong.length ? ' ' + JSON.stringify(wrong.slice(0, 3)) : ''));
     ok(bad.length === 0 && errors.length === 0, 'ошибок загрузки и в консоли нет' + (bad.length || errors.length ? ' ' + JSON.stringify(bad.concat(errors).slice(0, 3)) : ''));
     await ctx.close();
   }
@@ -618,7 +618,9 @@ async function main() {
       await page.waitForFunction(() => !document.querySelector('#app img.photo'), null, { timeout: 5000 }).catch(() => {});
       return page.evaluate(([sel, n]) => document.querySelectorAll(sel).length === n && !document.querySelector('#app img.photo'), [sel, n]);
     };
-    ok(await check('', '.hero-art svg, .tile-art svg', 5), 'без фото: на главной рисунки стола и разделов');
+    ok(await check('', '.hero-art svg, .tile-art svg, .feature-art svg', 6), 'без фото: на главной рисунки стола, плашки и разделов');
+    ok(await check('#c/trendy', '.rcard-art svg', 20), 'без фото: в «Модном столе» рисунки блюд');
+    ok(await check('#r/snack-tree', '.r-hero svg', 1), 'без фото: в модном рецепте рисунок блюда');
     ok(await check('#c/salads', '.rcard-art svg', 10), 'без фото: в разделе рисунки блюд');
     ok(await check('#r/olivier', '.r-hero svg', 1), 'без фото: в рецепте рисунок блюда');
     await page.goto(base + '#menu'); await page.click('[data-act="ready-menu"]');
