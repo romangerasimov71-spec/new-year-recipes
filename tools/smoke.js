@@ -739,12 +739,13 @@ async function main() {
     await page.close();
   }
 
-  /* ---------- Листание главного фото (проба: оливье и полено) ---------- */
+  /* ---------- Листание главного фото (у всех 40 рецептов) ---------- */
   console.log('\nЛистание главного фото');
   {
     // Файлы: у рецептов с gallery — кадры 2…N в двух размерах, 960×720 до 150 КБ и 480×360 до 40 КБ.
     const R = recipeData(), withGal = R.filter(r => r.gallery);
-    ok(withGal.map(r => r.id + ':' + r.gallery).join() === 'olivier:5,buche:5', 'листание только у оливье и полена, по 5 кадров (' + withGal.map(r => r.id + ':' + r.gallery).join() + ')');
+    const notFive = R.filter(r => r.gallery !== 5).map(r => r.id + ':' + r.gallery);
+    ok(R.length === 40 && withGal.length === 40 && !notFive.length, 'листание у всех 40 рецептов, по 5 кадров' + (notFive.length ? ' ' + notFive.join() : ''));
     const bad = [], sizes = { full: [], thumb: [] };
     for (const r of withGal) for (let n = 2; n <= r.gallery; n++) for (const [sz, lim] of [['full', 150], ['thumb', 40]]) {
       const f = path.join(ROOT, 'img/photo/gallery', sz, r.id + '-' + n + '.webp');
@@ -878,18 +879,21 @@ async function main() {
     await ctx.close();
   }
   {
-    // У остальных рецептов ленты нет: ни точек, ни стрелок; в списках и меню — только главное фото.
+    // У всех 40 рецептов на странице — лента из 5 кадров: «1 из 5», 5 точек, кадр 1 и кадр 2 загрузились.
+    // В списках и меню — только главное фото.
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     const errors = watchErrors(page);
-    const galReq = []; page.on('request', r => { if (/img\/photo\/gallery\//.test(r.url())) galReq.push(r.url()); });
-    const R = recipeData(), others = R.filter(r => !r.gallery), withGal = [];
+    let galReq = []; page.on('request', r => { if (/img\/photo\/gallery\//.test(r.url())) galReq.push(r.url()); });
+    const R = recipeData(), bad = [];
     await page.goto(base);
-    for (const r of others) {
+    for (const r of R) {
       await page.goto(base + '#r/' + r.id);
-      const has = await page.evaluate(() => !!document.querySelector('.r-gal, .gal-arrow, .gal-dot, .gal-count') || !document.querySelector('.r-hero img.photo'));
-      if (has) withGal.push(r.id);
+      await page.waitForFunction(id => { const s = document.querySelector('.gal-slide[data-n="2"] img'); return s && s.complete && s.naturalWidth > 0 && s.getAttribute('src').indexOf(id + '-2') > 0; }, r.id, { timeout: 5000 }).catch(() => {});
+      const g = await galInfo(page);
+      if (!g || g.n !== 5 || g.dots !== 5 || g.count !== '1 из 5' || g.srcs[0] !== 'img/photo/full/' + r.id + '.webp' || g.srcs[1] !== 'img/photo/gallery/full/' + r.id + '-2.webp') bad.push(r.id + ' ' + JSON.stringify(g && { n: g.n, count: g.count, srcs: g.srcs.slice(0, 2) }));
     }
-    ok(others.length === 38 && !withGal.length && !galReq.length, 'у остальных ' + others.length + ' рецептов ленты нет: одно фото, ни точек, ни стрелок' + (withGal.length ? ' ' + withGal.join() : ''));
+    ok(R.length === 40 && !bad.length, 'у всех ' + R.length + ' рецептов на странице лента из 5 кадров, «1 из 5», кадры 1 и 2 загружены' + (bad.length ? ' ' + bad.join('; ') : ''));
+    galReq = [];
     for (const h of ['#c/salads', '#c/sweets', '#c/trendy']) await page.goto(base + h);
     await page.goto(base + '#menu');
     await page.evaluate(() => { const s = { menu: ['olivier', 'buche'], guests: 6 }; localStorage.setItem('nyr.v1', JSON.stringify(s)); });
