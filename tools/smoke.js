@@ -40,10 +40,12 @@ function serve() {
   return new Promise(r => srv.listen(0, '127.0.0.1', () => r(srv)));
 }
 
-function appSize() {
-  const files = ['index.html', 'css/app.css', 'js/recipes.js', 'js/art.js', 'js/app.js'];
-  return files.reduce((s, f) => s + fs.statSync(path.join(ROOT, f)).size, 0);
-}
+// Свой код (без фото и без готовых библиотек площадки — Playgama Bridge и VK Bridge считаются отдельно).
+const OWN_FILES = ['index.html', 'css/app.css', 'js/config.js', 'js/vk-start.js', 'js/platform.js', 'js/analytics.js',
+  'js/recipes.js', 'js/art.js', 'js/app.js', 'js/vk-bridge-loaded.js', 'playgama-bridge-config.json'];
+const VENDOR_FILES = ['playgama-bridge.js', 'js/vk-bridge.min.js'];
+function sizeOf(files) { return files.reduce((s, f) => s + fs.statSync(path.join(ROOT, f)).size, 0); }
+function appSize() { return sizeOf(OWN_FILES); }
 // Фото блюд считаем отдельно от кода: full (960×720) — до 150 КБ, thumb (480×360) — до 40 КБ каждое.
 const PHOTO_IDS = ['olivier', 'shuba', 'mimosa', 'crab', 'vinegret', 'meat-french', 'chicken', 'duck', 'potato', 'buzhenina',
   'eggs', 'tartlets', 'lavash', 'sprats', 'holodets', 'napoleon', 'sharlotka', 'tiramisu', 'kartoshka', 'gingerbread',
@@ -121,8 +123,8 @@ async function main() {
   console.log('Адрес: ' + base);
 
   const size = appSize();
-  console.log('\nРазмер приложения: ' + (size / 1024).toFixed(1) + ' КБ');
-  ok(size < 300 * 1024, 'код меньше 300 КБ (без фото)');
+  console.log('\nРазмер приложения: ' + (size / 1024).toFixed(1) + ' КБ свой код + ' + (sizeOf(VENDOR_FILES) / 1024).toFixed(1) + ' КБ Playgama Bridge и VK Bridge (без фото)');
+  ok(size < 400 * 1024, 'свой код меньше 400 КБ (без фото и библиотек площадки)');
   for (const [sz, lim] of [['full', 150], ['thumb', 40]]) {
     const l = photoSizes(sz), sum = l.reduce((s, x) => s + Math.max(0, x.size), 0), max = l.reduce((a, b) => (b.size > a.size ? b : a));
     console.log('Фото ' + sz + ': ' + l.filter(x => x.size > 0).length + ' шт, всего ' + (sum / 1024).toFixed(0) + ' КБ, самое большое ' + max.n + ' ' + (max.size / 1024).toFixed(1) + ' КБ');
@@ -151,6 +153,24 @@ async function main() {
   }
 
   const browser = await chromium.launch();
+  // Приложение запускается не сразу: сначала площадка (Playgama Bridge) и сохранённое.
+  // Каждый переход и перезагрузка в тесте ждут готовности (NYR.isReady()).
+  const waitReady = (page) => page.waitForFunction(() => window.NYR && window.NYR.isReady && window.NYR.isReady(), null, { timeout: 20000 }).catch(() => {});
+  const patchPage = (page) => {
+    if (page.__patched) return page;
+    page.__patched = true;
+    const g = page.goto.bind(page), rl = page.reload.bind(page);
+    page.goto = async (...a) => { const r = await g(...a); await waitReady(page); return r; };
+    page.reload = async (...a) => { const r = await rl(...a); await waitReady(page); return r; };
+    return page;
+  };
+  const bNewPage = browser.newPage.bind(browser), bNewContext = browser.newContext.bind(browser);
+  browser.newPage = async (...a) => patchPage(await bNewPage(...a));
+  browser.newContext = async (...a) => {
+    const ctx = await bNewContext(...a), cNewPage = ctx.newPage.bind(ctx);
+    ctx.newPage = async (...b) => patchPage(await cNewPage(...b));
+    return ctx;
+  };
 
   /* ---------- Данные ---------- */
   console.log('\nДанные рецептов');
@@ -554,7 +574,7 @@ async function main() {
     await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
     await page.reload();
     const home = await loadedAll();
-    ok(home.length === 6 && home.every(i => i.ok), 'главная: праздничный стол, плашка «Модный стол» и 4 плитки разделов — фото (' + home.length + ')');
+    ok(home.length === 7 && home.every(i => i.ok), 'главная: праздничный стол, плашка «Модный стол», «Блюдо дня» и 4 плитки разделов — фото (' + home.length + ')');
     ok(home.some(i => i.src === 'img/photo/thumb/cat-trendy.webp' && i.alt === 'Модный стол'), 'плашка «Модный стол» — фото cat-trendy');
     ok(home[0].src === 'img/photo/thumb/hero.webp' && !home[0].lazy, 'главная: праздничный стол — сразу, без отложенной загрузки');
     const seen = new Set(home.map(i => i.src));
@@ -586,7 +606,8 @@ async function main() {
     await page.click('[data-act="ready-menu"]');
     const menu = await loadedAll(); menu.forEach(i => seen.add(i.src));
     ok(menu.length === 5 && menu.every(i => i.ok && /thumb/.test(i.src)), 'меню: маленькие фото блюд');
-    await page.evaluate(ids => { const s = JSON.parse(localStorage.getItem('nyr.v1')); s.menu = s.menu.concat(ids); localStorage.setItem('nyr.v1', JSON.stringify(s)); }, trIds);
+    await page.evaluate(() => window.NYR.flushSave());
+    await page.evaluate(ids => { const s = JSON.parse(localStorage.getItem('nyr_menu')); s.m = s.m.concat(ids); localStorage.setItem('nyr_menu', JSON.stringify(s)); }, trIds);
     await page.goto(base + '#shop'); await page.goto(base + '#menu'); await page.reload();
     await loadedAll();
     ok(await page.locator('.mitem-art svg').count() === 0 && await page.locator('.mitem-art img').count() === 25, 'меню с модными: 25 фото, рисунков нет');
@@ -806,14 +827,14 @@ async function main() {
     const box = await page.locator('.gal-view').boundingBox();
     const cy = Math.max(box.y + 20, Math.min(box.y + box.height / 2, vp.h - 20));
     const cdp = vp.t ? await ctx.newCDPSession(page) : null;
-    const swipe = async (x0, y0, x1, y1) => {
+    const swipe = async (x0, y0, x1, y1, stepMs = 16) => {
       if (cdp) {
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] });
-        for (let i = 1; i <= 12; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + (x1 - x0) * i / 12, y: y0 + (y1 - y0) * i / 12 }] }); await page.waitForTimeout(16); }
+        for (let i = 1; i <= 12; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + (x1 - x0) * i / 12, y: y0 + (y1 - y0) * i / 12 }] }); await page.waitForTimeout(stepMs); }
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       } else {
         await page.mouse.move(x0, y0); await page.mouse.down();
-        for (let i = 1; i <= 12; i++) { await page.mouse.move(x0 + (x1 - x0) * i / 12, y0 + (y1 - y0) * i / 12); await page.waitForTimeout(16); }
+        for (let i = 1; i <= 12; i++) { await page.mouse.move(x0 + (x1 - x0) * i / 12, y0 + (y1 - y0) * i / 12); await page.waitForTimeout(stepMs); }
         await page.mouse.up();
       }
       await settle(page);
@@ -827,7 +848,7 @@ async function main() {
     await page.screenshot({ path: path.join(SHOTS, 'gal-' + vp.w + 'x' + vp.h + '-frame4.png') });
     await swipe(box.x + box.width * 0.25, cy, box.x + box.width * 0.75, cy);
     ok((await galInfo(page)).count === '3 из 5', name + ': свайп вправо — кадр 3');
-    await swipe(box.x + box.width * 0.55, cy, box.x + box.width * 0.45, cy);
+    await swipe(box.x + box.width * 0.55, cy, box.x + box.width * 0.45, cy, 40);
     ok((await galInfo(page)).shown === 3, name + ': короткий медленный сдвиг — лента возвращается на тот же кадр');
     if (vp.t) {
       const y0 = await page.evaluate(() => scrollY);
@@ -1010,6 +1031,8 @@ async function main() {
       const errors = watchErrors(page);
       await page.goto(base);
       await page.evaluate(c => localStorage.setItem('nyr.v1', JSON.stringify(c)), c);
+      // то же — в новых ключах хранилища (полная сборка)
+      await page.evaluate(c => ['nyr_menu', 'nyr_bought', 'nyr_steps', 'nyr_plan', 'nyr_visits'].forEach(k => localStorage.setItem(k, JSON.stringify(c))), c);
       for (const h of ['#r/olivier', '#menu', '#shop', '']) {
         await page.goto(base + h);
         await page.reload();

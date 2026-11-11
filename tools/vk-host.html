@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Подставной клиент ВК/ОК (проверка)</title>
+<style>html,body{margin:0;height:100%;background:#222}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head>
+<body>
+<!--
+  Проверочная «площадка»: открывает приложение во фрейме с параметрами запуска ВК или ОК
+  и отвечает на вызовы VK Bridge, как клиент ВК (через postMessage, тот же протокол, что в браузерной версии ВК).
+  Только для автотестов (tools/check-platform.js). Каждый вызов пишется в window.CALLS.
+  Параметры: ?client=vk|ok&platform=mobile_android|desktop_web|mobile_web_ok…&ads=ok|fail|none|silent|cancel&hash=r/olivier
+-->
+<iframe id="app" allow="clipboard-write"></iframe>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var client = q.get('client') || 'vk';
+  var platform = q.get('platform') || (client === 'ok' ? 'mobile_web_ok' : 'mobile_android');
+  var ads = q.get('ads') || 'ok';
+  var store = {};
+  window.CALLS = [];
+  window.STORE = store;
+  window.VK_HOST = { ads: ads };
+  var params = 'vk_app_id=51000000&vk_user_id=1&vk_platform=' + platform + '&vk_language=' + (q.get('lang') || 'ru') +
+    (client === 'ok' ? '&vk_client=ok' : '') + '&vk_is_app_user=1&sign=test';
+  var frame = document.getElementById('app');
+  frame.src = '../index.html?' + params + (q.get('extra') ? '&' + q.get('extra') : '') + (q.get('hash') ? '#' + q.get('hash') : '');
+  function reply(win, type, data, rid) {
+    var d = Object.assign({}, data || {});
+    if (rid !== undefined) d.request_id = rid;
+    win.postMessage({ type: type, data: d }, '*');
+  }
+  window.addEventListener('message', function (e) {
+    var m = e.data;
+    if (!m || m.type !== 'vk-connect' || !m.handler) return;
+    var h = m.handler, p = m.params || {}, rid = p.request_id, win = e.source;
+    window.CALLS.push({ h: h, p: JSON.parse(JSON.stringify(p)), t: Math.round(performance.now()) });
+    var ok = function (d) { setTimeout(function () { reply(win, h + 'Result', d || { result: true }, rid); }, 10); };
+    var fail = function () { setTimeout(function () { reply(win, h + 'Failed', { error_type: 'client_error', error_data: { error_code: 1 } }, rid); }, 10); };
+    var mode = window.VK_HOST.ads;
+    switch (h) {
+      case 'VKWebAppStorageGet':
+        return ok({ keys: (p.keys || []).map(function (k) { return { key: k, value: store[k] || '' }; }) });
+      case 'VKWebAppStorageSet':
+        store[p.key] = p.value; return ok();
+      case 'VKWebAppCheckNativeAds':
+        return mode === 'none' || mode === 'fail' ? ok({ result: false }) : ok({ result: true });
+      case 'VKWebAppShowNativeAds':
+        if (mode === 'silent') return;                       // площадка молчит
+        if (mode === 'fail' || mode === 'none') return fail();
+        if (mode === 'cancel') return setTimeout(function () { reply(win, h + 'Result', { result: false }, rid); }, 400);
+        return setTimeout(function () { reply(win, h + 'Result', { result: true }, rid); }, 400);
+      case 'VKWebAppShowBannerAd': return ok({ result: true });
+      case 'VKWebAppHideBannerAd': return ok({ result: true });
+      case 'VKWebAppGetLaunchParams': return ok({ vk_app_id: 51000000, vk_platform: platform });
+      default: return ok();
+    }
+  });
+})();
+</script>
+</body>
+</html>

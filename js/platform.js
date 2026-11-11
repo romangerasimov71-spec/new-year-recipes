@@ -96,7 +96,8 @@
     // скрипт Bridge грузился долго, на initialize остаётся меньше времени.
     var since = (window.performance && performance.now) ? performance.now() : 0;
     timeoutMs = Math.max(500, Math.min(timeoutMs, (opts.deadlineMs || 10000) - since));
-    var b = window.bridge;
+    // Открыто файлом (file://): Bridge не может прочитать свой файл настроек — запускаемся без него.
+    var b = location.protocol === "file:" ? null : window.bridge;
     var started = new Promise(function (resolve) {
       if (!b || typeof b.initialize !== "function") { resolve(false); return; }
       var done = false;

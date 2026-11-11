@@ -649,7 +649,7 @@ html.has-banner .toast { bottom: calc(var(--banner-h, 0px) + 16px + env(safe-are
 @media (max-width: 360px) {
   .day-dish-art { width: 96px; }
   .day-dish-title { font-size: 20px; }
-  .hero-count { font-size: 16px; padding: 4px 10px; }
+  .hero-count { font-size: 17px; padding: 4px 10px; }
   .plan-item { padding: 12px; }
 }
 @media (min-width: 600px) {
