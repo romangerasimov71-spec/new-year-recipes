@@ -335,7 +335,7 @@
   };
   function dishPhoto(r, size, first) { return photo(r.id, size, r.title, 'dish:' + r.id, first); }
 
-  /* ---------- Фото шагов (проба на оливье) ----------
+  /* ---------- Фото шагов ----------
      img/photo/steps/full/<id>-<N>.webp (960×720) и img/photo/steps/thumb/<id>-<N>.webp (480×360), N — номер шага. */
   function stepPhotoNums(r) {
     var v = r.stepPhotos, out = [];

@@ -52,6 +52,19 @@ function photoSizes(sz) {
   return PHOTO_IDS.map(n => { const f = path.join(ROOT, 'img/photo', sz, n + '.webp'); return { n, size: fs.existsSync(f) ? fs.statSync(f).size : -1 }; });
 }
 
+// Фото шагов: по данным рецептов (stepPhotos — число N или список номеров шагов).
+function recipeData() {
+  const ctx = { window: {} };
+  require('vm').runInNewContext(fs.readFileSync(path.join(ROOT, 'js/recipes.js'), 'utf8'), ctx);
+  return ctx.window.NYR_DATA.RECIPES;
+}
+function stepNums(r) {
+  const v = r.stepPhotos, out = [];
+  if (typeof v === 'number') for (let n = 1; n <= Math.min(v, r.steps.length); n++) out.push(n);
+  else if (Array.isArray(v)) v.forEach(n => { if (n >= 1 && n <= r.steps.length && !out.includes(n)) out.push(n); });
+  return out;
+}
+
 function watchErrors(page) {
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -111,6 +124,23 @@ async function main() {
     console.log('Фото ' + sz + ': ' + l.filter(x => x.size > 0).length + ' шт, всего ' + (sum / 1024).toFixed(0) + ' КБ, самое большое ' + max.n + ' ' + (max.size / 1024).toFixed(1) + ' КБ');
     const missing = l.filter(x => x.size < 0).map(x => x.n), big = l.filter(x => x.size > lim * 1024).map(x => x.n);
     ok(!missing.length && !big.length, 'фото ' + sz + ': все 25 на месте, каждое не больше ' + lim + ' КБ' + (missing.length ? ' нет: ' + missing.join() : '') + (big.length ? ' больше: ' + big.join() : ''));
+  }
+
+  {
+    // Фото шагов: у каждого рецепта есть, файлы на месте, лишних файлов нет, full ≤ 150 КБ, thumb ≤ 40 КБ.
+    const R = recipeData(), want = [];
+    R.forEach(r => stepNums(r).forEach(n => want.push(r.id + '-' + n + '.webp')));
+    const noPhotos = R.filter(r => !stepNums(r).length).map(r => r.id);
+    ok(R.length === 20 && !noPhotos.length, 'фото шагов есть у всех ' + R.length + ' рецептов' + (noPhotos.length ? ' нет у: ' + noPhotos.join() : ''));
+    for (const [sz, lim] of [['full', 150], ['thumb', 40]]) {
+      const dir = path.join(ROOT, 'img/photo/steps', sz), have = fs.readdirSync(dir).filter(f => f.endsWith('.webp'));
+      const missing = want.filter(f => !have.includes(f)), extra = have.filter(f => !want.includes(f));
+      const sizes = have.map(f => ({ f, size: fs.statSync(path.join(dir, f)).size })), max = sizes.reduce((a, b) => (b.size > a.size ? b : a));
+      const big = sizes.filter(x => x.size > lim * 1024).map(x => x.f), sum = sizes.reduce((s, x) => s + x.size, 0);
+      console.log('Фото шагов ' + sz + ': ' + have.length + ' шт, всего ' + (sum / 1024).toFixed(0) + ' КБ, самое большое ' + max.f + ' ' + (max.size / 1024).toFixed(1) + ' КБ');
+      ok(!missing.length && !extra.length && !big.length, 'фото шагов ' + sz + ': ' + want.length + ' по данным, все на месте, лишних нет, каждое не больше ' + lim + ' КБ' +
+        (missing.length ? ' нет: ' + missing.join() : '') + (extra.length ? ' лишние: ' + extra.join() : '') + (big.length ? ' больше: ' + big.join() : ''));
+    }
   }
 
   const browser = await chromium.launch();
@@ -493,7 +523,7 @@ async function main() {
     await page.close();
   }
 
-  /* ---------- Фото шагов (проба на оливье) ---------- */
+  /* ---------- Фото шагов ---------- */
   console.log('\nФото шагов');
   for (const vp of [{ w: 390, h: 844, t: true }, { w: 320, h: 568, t: true }, { w: 844, h: 390, t: true }, { w: 1280, h: 800, t: false }]) {
     const name = vp.w + '×' + vp.h;
@@ -565,13 +595,32 @@ async function main() {
     await ctx.close();
   }
   {
-    // У других рецептов фото шагов нет; если фото шагов не загрузились — блока нет, ошибок нет.
+    // У всех рецептов фото шагов на странице: столько, сколько в данных, все грузятся, alt «Шаг N: …», крупно — свой файл.
+    // Если фото шагов не загрузились — блока нет, ошибок нет.
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     const jsErrors = []; page.on('pageerror', e => jsErrors.push(e.message));
-    const ids = await (async () => { await page.goto(base); return page.evaluate(() => window.NYR_DATA.RECIPES.filter(r => r.id !== 'olivier').map(r => r.id)); })();
-    let other = 0;
-    for (const id of ids) { await page.goto(base + '#r/' + id); other += await page.locator('.step-photo, .step-li.has-photo').count(); }
-    ok(other === 0, 'у других рецептов блока фото шагов нет');
+    const bad = [];
+    let total = 0;
+    for (const r of recipeData()) {
+      const nums = stepNums(r);
+      await page.goto(base + '#r/' + r.id);
+      const sp = await page.evaluate(async () => {
+        const imgs = [...document.querySelectorAll('.step-photo img')];
+        imgs.forEach(i => { i.loading = 'eager'; });
+        await Promise.all(imgs.map(i => i.complete ? 0 : new Promise(res => { i.onload = i.onerror = res; })));
+        return imgs.map(i => ({ src: i.getAttribute('src'), ok: i.naturalWidth === 480 && i.naturalHeight === 360, alt: i.alt }));
+      });
+      total += sp.length;
+      const good = sp.length === nums.length && sp.every((x, k) => x.ok && x.src === 'img/photo/steps/thumb/' + r.id + '-' + nums[k] + '.webp' && x.alt.startsWith('Шаг ' + nums[k] + ': '));
+      if (!good) { bad.push(r.id + ' ' + sp.length + '/' + nums.length); continue; }
+      // Крупно открывается последнее фото рецепта — из full, той же картинки.
+      await page.locator('.step-photo').nth(nums.length - 1).click();
+      await page.waitForFunction(() => { const i = document.querySelector('#viewer .viewer-img'); return i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 }).catch(() => {});
+      const v = await page.evaluate(() => { const i = document.querySelector('#viewer .viewer-img'); return { src: i.getAttribute('src'), w: i.naturalWidth, count: document.querySelector('#viewer .viewer-count').textContent }; });
+      if (v.src !== 'img/photo/steps/full/' + r.id + '-' + nums[nums.length - 1] + '.webp' || v.w !== 960 || v.count !== 'Шаг ' + nums.length + ' из ' + nums.length) bad.push(r.id + ' крупно ' + JSON.stringify(v));
+      await page.keyboard.press('Escape');
+    }
+    ok(!bad.length && jsErrors.length === 0, 'фото шагов у всех рецептов: ' + total + ' шт на страницах, число как в данных, все грузятся, крупно — свой файл' + (bad.length ? ' плохо: ' + bad.join('; ') : '') + (jsErrors.length ? ' ' + JSON.stringify(jsErrors) : ''));
     await page.route('**/img/photo/steps/**', r => r.abort());
     await page.goto(base + '#r/olivier');
     await page.evaluate(() => document.querySelectorAll('.step-photo img').forEach(i => { i.loading = 'eager'; }));
