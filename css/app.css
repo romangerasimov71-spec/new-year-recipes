@@ -627,8 +627,12 @@ html.has-banner .toast { bottom: calc(var(--banner-h, 0px) + 16px + env(safe-are
 .postcard-hint, .postcard-full-hint { text-align: center; }
 .sheet-full .modal-box { max-width: 720px; }
 @media (min-width: 600px) and (max-height: 500px) {
-  .sheet-postcard .postcard-body { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start; }
-  .postcard-img { max-height: 70vh; }
+  /* телефон в альбоме: открытка слева, кнопки справа */
+  .sheet-postcard .modal-box { max-width: 780px; }
+  .sheet-postcard .postcard-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 16px; align-items: start; }
+  .sheet-postcard .postcard-img { grid-row: span 2; max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); }
+  .sheet-postcard .sheet-actions { grid-template-columns: 1fr; margin-top: 0; }
+  .sheet-postcard .postcard-hint { grid-column: 2; text-align: left; }
   .postcard-full-img { max-height: 62vh; }
 }
 

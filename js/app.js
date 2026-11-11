@@ -964,6 +964,7 @@
         '<a class="btn btn-secondary" href="#plan" data-src="menu">' + ICON.cal + 'Открыть план по дням</a></section>';
     }
     if (!planAvailable()) return '';
+    AN.once('plan_offer_shown', { source: 'menu' });
     return '<section class="card plan-card" data-testid="plan-card"><h2>План готовки по дням</h2>' +
       '<p class="plan-offer">Посмотрите рекламу — и получите план: что готовить 29, 30 и 31 декабря.</p>' +
       '<button class="btn btn-primary" id="planAdBtn" data-act="plan-ad" data-src="menu">' + ICON.cal + 'Составить план по дням</button>' +
@@ -1106,8 +1107,6 @@
     } else if (r.name === 'plan') {
       if (planOpen()) AN.event('plan_opened', { source: pendingSrc || (prev ? 'menu' : 'link'), dishes: state.menu.length });
       else if (state.menu.length) AN.event('plan_offer_shown', { source: prev ? 'plan' : 'link' });
-    } else if (r.name === 'menu' && state.menu.length && !planOpen() && planAvailable()) {
-      AN.once('plan_offer_shown', { source: 'menu' });
     }
   }
 
