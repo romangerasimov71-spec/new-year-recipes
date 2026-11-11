@@ -41,13 +41,15 @@ function serve() {
 }
 
 function appSize() {
-  const files = ['index.html', 'css/app.css', 'js/recipes.js', 'js/art.js', 'js/photo.js', 'js/app.js'];
+  const files = ['index.html', 'css/app.css', 'js/recipes.js', 'js/art.js', 'js/app.js'];
   return files.reduce((s, f) => s + fs.statSync(path.join(ROOT, f)).size, 0);
 }
-// Фото считаем отдельно: они грузятся только на странице своего рецепта (маленькая — в списке и меню).
-const PHOTO_FILES = ['plate.webp', 'ingredients.webp', 'done.webp', 'thumb.webp'];
-function photoSize(dir) {
-  return PHOTO_FILES.reduce((s, f) => s + fs.statSync(path.join(ROOT, dir, f)).size, 0);
+// Фото блюд считаем отдельно от кода: full (960×720) — до 150 КБ, thumb (480×360) — до 40 КБ каждое.
+const PHOTO_IDS = ['olivier', 'shuba', 'mimosa', 'crab', 'vinegret', 'meat-french', 'chicken', 'duck', 'potato', 'buzhenina',
+  'eggs', 'tartlets', 'lavash', 'sprats', 'holodets', 'napoleon', 'sharlotka', 'tiramisu', 'kartoshka', 'gingerbread',
+  'hero', 'cat-salads', 'cat-hot', 'cat-snacks', 'cat-sweets'];
+function photoSizes(sz) {
+  return PHOTO_IDS.map(n => { const f = path.join(ROOT, 'img/photo', sz, n + '.webp'); return { n, size: fs.existsSync(f) ? fs.statSync(f).size : -1 }; });
 }
 
 function watchErrors(page) {
@@ -103,10 +105,13 @@ async function main() {
 
   const size = appSize();
   console.log('\nРазмер приложения: ' + (size / 1024).toFixed(1) + ' КБ');
-  ok(size < 300 * 1024, 'весь размер меньше 300 КБ (без фото)');
-  const olivierPhoto = photoSize('img/photo/olivier');
-  console.log('Фото оливье (тарелка, продукты, готовое, маленькая): ' + (olivierPhoto / 1024).toFixed(1) + ' КБ');
-  ok(olivierPhoto < 250 * 1024, 'фото одного рецепта меньше 250 КБ');
+  ok(size < 300 * 1024, 'код меньше 300 КБ (без фото)');
+  for (const [sz, lim] of [['full', 150], ['thumb', 40]]) {
+    const l = photoSizes(sz), sum = l.reduce((s, x) => s + Math.max(0, x.size), 0), max = l.reduce((a, b) => (b.size > a.size ? b : a));
+    console.log('Фото ' + sz + ': ' + l.filter(x => x.size > 0).length + ' шт, всего ' + (sum / 1024).toFixed(0) + ' КБ, самое большое ' + max.n + ' ' + (max.size / 1024).toFixed(1) + ' КБ');
+    const missing = l.filter(x => x.size < 0).map(x => x.n), big = l.filter(x => x.size > lim * 1024).map(x => x.n);
+    ok(!missing.length && !big.length, 'фото ' + sz + ': все 25 на месте, каждое не больше ' + lim + ' КБ' + (missing.length ? ' нет: ' + missing.join() : '') + (big.length ? ' больше: ' + big.join() : ''));
+  }
 
   const browser = await chromium.launch();
 
@@ -132,21 +137,13 @@ async function main() {
       const perCat = {};
       D.RECIPES.forEach(r => { perCat[r.cat] = (perCat[r.cat] || 0) + 1; });
       const ids = D.RECIPES.map(r => r.id);
-      D.RECIPES.filter(r => r.photo).forEach(r => {
-        const ph = r.photo;
-        if (!/^img\/photo\/[a-z-]+\/$/.test(ph.dir)) bad.push(r.id + ': photo.dir ' + ph.dir);
-        (ph.labels || []).forEach(l => {
-          if (!r.ingredients.some(i => i.name.toLowerCase().startsWith(l.text.toLowerCase().slice(0, 5)))) bad.push(r.id + ': подпись «' + l.text + '» не из ингредиентов');
-          if (!(l.x >= 0 && l.x <= 100 && l.y >= 0 && l.y <= 100) || ['left', 'right'].indexOf(l.side) < 0) bad.push(r.id + ': подпись ' + l.text + ' — место');
-        });
-      });
-      return { n: D.RECIPES.length, perCat, bad, unique: new Set(ids).size === ids.length, photos: D.RECIPES.filter(r => r.photo).map(r => r.id) };
+      return { n: D.RECIPES.length, perCat, bad, unique: new Set(ids).size === ids.length, ids };
     });
     ok(d.n === 20, 'рецептов 20 (' + d.n + ')');
     ok(Object.values(d.perCat).every(v => v === 5) && Object.keys(d.perCat).length === 4, 'по 5 в каждом разделе ' + JSON.stringify(d.perCat));
     ok(d.unique, 'id рецептов не повторяются');
-    ok(d.bad.length === 0, 'шаги 4–8, совет, картинка, единицы и отделы на месте; подписи фото — из ингредиентов' + (d.bad.length ? ' ' + JSON.stringify(d.bad) : ''));
-    ok(d.photos.join() === 'olivier', 'фото только у оливье (' + d.photos.join() + ')');
+    ok(d.bad.length === 0, 'шаги 4–8, совет, картинка, единицы и отделы на месте' + (d.bad.length ? ' ' + JSON.stringify(d.bad) : ''));
+    ok(d.ids.every(id => PHOTO_IDS.indexOf(id) >= 0), 'у каждого рецепта есть фото в списке PHOTO_IDS');
     await page.close();
   }
 
@@ -417,101 +414,83 @@ async function main() {
     await page.close();
   }
 
-  /* ---------- Фото-сцена оливье (проба) ---------- */
-  console.log('\nФото-сцена оливье');
-  for (const vp of [{ w: 390, h: 844, t: true }, { w: 320, h: 568, t: true }, { w: 844, h: 390, t: true }, { w: 1280, h: 800, t: false }]) {
-    const name = vp.w + '×' + vp.h;
-    const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, hasTouch: vp.t, isMobile: vp.t });
+  /* ---------- Фото блюд ---------- */
+  console.log('\nФото блюд');
+  {
+    // Все страницы с фото: главная, 4 раздела, 20 рецептов, меню; фото загрузились, у рецептов — своё большое фото.
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    const photoReq = [];
-    page.on('request', r => { if (/img\/photo\//.test(r.url())) photoReq.push(r.url().split('/img/photo/')[1]); });
-    if (vp.w === 390) {
-      await page.goto(base); await page.goto(base + '#r/shuba'); await page.waitForTimeout(200);
-      ok(photoReq.length === 0, name + ': на главной и в других рецептах фото не грузятся (' + photoReq.join() + ')');
-      await page.goto(base + '#c/salads'); await page.waitForTimeout(300);
-      ok(photoReq.join() === 'olivier/thumb.webp', name + ': в списке салатов — только маленькое фото оливье (' + photoReq.join() + ')');
-      photoReq.length = 0;
-    }
-    await page.goto(base + '#r/olivier');
-    await page.waitForSelector('.ph-ready', { timeout: 5000 });
-    await page.waitForTimeout(450);
-    if (vp.w === 390) ok(['olivier/plate.webp', 'olivier/ingredients.webp', 'olivier/done.webp'].every(f => photoReq.indexOf(f) >= 0) && photoReq.indexOf('olivier/fly.webp') < 0, name + ': на оливье грузятся тарелка, продукты, готовое (' + photoReq.join() + ')');
-    await layoutCheck(page, name + ' сцена оливье');
-    const g = await page.evaluate(() => {
-      const st = document.querySelector('.ph-stage').getBoundingClientRect(), hdr = document.querySelector('.hdr').offsetHeight;
-      const L = [...document.querySelectorAll('.ph-lbl')].map(e => e.getBoundingClientRect());
-      let overlap = 0, out = 0;
-      L.forEach((a, i) => { if (a.left < st.left - 0.5 || a.right > st.right + 0.5 || a.top < st.top - 0.5 || a.bottom > st.bottom + 0.5) out++; L.slice(i + 1).forEach(b => { if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) overlap++; }); });
-      const fsz = Math.min(...[...document.querySelectorAll('.ph-lbl')].map(e => parseFloat(getComputedStyle(e).fontSize)));
-      const btn = [...document.querySelectorAll('.ph-btn')].find(b => b.getBoundingClientRect().width > 0);
-      return { w: st.width, h: st.height, fit: st.height <= innerHeight - hdr, labels: L.length, overlap, out, fsz, svgOff: getComputedStyle(document.querySelector('.ph-svg')).display === 'none', btn: btn && btn.textContent };
+    const bad = [];
+    page.on('response', r => { if (/img\/photo\//.test(r.url()) && r.status() >= 400) bad.push(r.url()); });
+    const loadedAll = async () => page.evaluate(async () => {
+      const imgs = [...document.querySelectorAll('#app img.photo')];
+      imgs.forEach(i => { i.loading = 'eager'; });
+      await Promise.all(imgs.map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
+      return imgs.map(i => ({ src: i.getAttribute('src'), ok: i.naturalWidth > 0, alt: i.alt, lazy: i.getAttribute('loading') === 'lazy', w: +i.getAttribute('width'), h: +i.getAttribute('height') }));
     });
-    ok(g.labels === 7 && g.overlap === 0 && g.out === 0 && g.fsz >= 16, name + ': 7 подписей, не наезжают, не обрезаны, шрифт ' + g.fsz + 'px' + (g.overlap || g.out ? ' (наезжают ' + g.overlap + ', за краем ' + g.out + ')' : ''));
-    ok(g.fit, name + ': сцена не выше экрана (' + Math.round(g.w) + '×' + Math.round(g.h) + ')');
-    if (vp.w >= 900) ok(g.w <= 520, name + ': на компьютере сцена не шире 520 px (' + Math.round(g.w) + ')');
-    ok(g.svgOff && /Смешать/.test(g.btn || ''), name + ': фото показано вместо рисунка, кнопка «Смешать»');
-    // Прокрутка: до конца — салат готов, обратно — продукты.
-    const st = await page.evaluate(() => window.NYR_PHOTO.state());
-    await page.evaluate(st => window.scrollTo(0, st.startY + st.dist * 0.5), st); await page.waitForTimeout(150);
-    const mid = await page.evaluate(() => ({ p: window.NYR_PHOTO.state().p, top: document.querySelector('.ph-stage').getBoundingClientRect().top, hdr: document.querySelector('.hdr').offsetHeight }));
-    ok(mid.p > 0.4 && mid.p < 0.6 && Math.abs(mid.top - mid.hdr) <= 1, name + ': на середине прокрутки сцена прилипла к верху, p=' + mid.p.toFixed(2));
-    await page.evaluate(st => window.scrollTo(0, st.startY + st.dist + 5), st); await page.waitForTimeout(150);
-    const end = await page.evaluate(() => ({ p: window.NYR_PHOTO.state().p, done: +getComputedStyle(document.querySelector('.ph-done')).opacity, lbl: +getComputedStyle(document.querySelector('.ph-labels')).opacity, btn: [...document.querySelectorAll('.ph-btn')].find(b => b.getBoundingClientRect().width > 0).textContent }));
-    ok(end.p === 1 && end.done === 1 && end.lbl === 0 && /Ещё раз/.test(end.btn), name + ': прокрутили — салат в тарелке, подписи скрыты, кнопка «Ещё раз»');
-    if (vp.w === 390) await page.screenshot({ path: path.join(OUT, 'olivier-done.png') });
-    await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(150);
-    const back = await page.evaluate(() => ({ p: window.NYR_PHOTO.state().p, done: +getComputedStyle(document.querySelector('.ph-done')).opacity }));
-    ok(back.p === 0 && back.done === 0, name + ': прокрутили обратно — снова продукты');
-    if (vp.w === 390) await page.screenshot({ path: path.join(OUT, 'olivier-start.png') });
-    // Кнопка: «Смешать» за ~1,8 с, потом «Ещё раз».
-    await page.locator('.ph-btn:visible').click();
-    await page.waitForTimeout(900);
-    const half = await page.evaluate(() => window.NYR_PHOTO.state().p);
-    await page.waitForTimeout(1200);
-    const full = await page.evaluate(() => window.NYR_PHOTO.state().p);
-    ok(half > 0.3 && half < 0.75 && full === 1, name + ': «Смешать» — салат готов за ~1,8 с (через 0,9 с p=' + half.toFixed(2) + ')');
-    await page.locator('.ph-btn:visible').click();
-    await page.waitForTimeout(300);
-    const again = await page.evaluate(() => window.NYR_PHOTO.state().p);
-    await page.waitForTimeout(2200);
-    ok(again < 0.6 && (await page.evaluate(() => window.NYR_PHOTO.state().p)) === 1, name + ': «Ещё раз» — продукты снова падают');
-    if (vp.w === 390) {
-      // Перерисовка страницы (порции +) не перезагружает сцену.
-      await page.evaluate(() => { window.__ph = document.querySelector('.ph'); });
-      await page.click('[data-act="por+"]');
-      ok(await page.evaluate(() => document.querySelector('.ph') === window.__ph && window.NYR_PHOTO.state().p === 1), name + ': «+ порция» не сбрасывает сцену');
+    await page.goto(base);
+    await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+    await page.reload();
+    const home = await loadedAll();
+    ok(home.length === 5 && home.every(i => i.ok), 'главная: праздничный стол и 4 плитки разделов — фото (' + home.length + ')');
+    ok(home[0].src === 'img/photo/thumb/hero.webp' && !home[0].lazy, 'главная: праздничный стол — сразу, без отложенной загрузки');
+    const seen = new Set(home.map(i => i.src));
+    const ids = await page.evaluate(() => window.NYR_DATA.RECIPES.map(r => ({ id: r.id, title: r.title })));
+    let cats = 0;
+    for (const c of ['salads', 'hot', 'snacks', 'sweets']) {
+      await page.goto(base + '#c/' + c);
+      const l = await loadedAll(); l.forEach(i => seen.add(i.src));
+      if (l.length === 5 && l.every(i => i.ok && /thumb/.test(i.src))) cats++;
     }
-    ok(errors.length === 0, name + ': ошибок нет' + (errors.length ? ' ' + JSON.stringify(errors.slice(0, 3)) : ''));
+    ok(cats === 4, 'разделы: у каждого блюда маленькое фото (thumb)');
+    const noPhoto = [];
+    for (const r of ids) {
+      await page.goto(base + '#r/' + r.id);
+      const l = await loadedAll(); l.forEach(i => seen.add(i.src));
+      const big = l.find(i => i.src === 'img/photo/full/' + r.id + '.webp');
+      if (!big || !big.ok || big.alt !== r.title || big.lazy || big.w / big.h !== 4 / 3) noPhoto.push(r.id);
+    }
+    ok(noPhoto.length === 0, 'на каждой странице рецепта — своё фото 4:3, alt = название, без отложенной загрузки' + (noPhoto.length ? ' ' + noPhoto.join() : ''));
+    await page.goto(base + '#menu');
+    await page.click('[data-act="ready-menu"]');
+    const menu = await loadedAll(); menu.forEach(i => seen.add(i.src));
+    ok(menu.length === 5 && menu.every(i => i.ok && /thumb/.test(i.src)), 'меню: маленькие фото блюд');
+    await page.screenshot({ path: path.join(OUT, 'photos-menu.png') });
+    // Все 25 фото (full + thumb) лежат на месте и открываются.
+    const all = await page.evaluate(async names => {
+      const res = [];
+      for (const n of names) for (const sz of ['full', 'thumb']) {
+        const im = new Image(); im.src = 'img/photo/' + sz + '/' + n + '.webp';
+        await new Promise(r => { im.onload = im.onerror = r; });
+        res.push({ n: sz + '/' + n, w: im.naturalWidth, h: im.naturalHeight });
+      }
+      return res;
+    }, PHOTO_IDS);
+    const wrong = all.filter(x => x.n.startsWith('full') ? !(x.w === 960 && x.h === 720) : !(x.w === 480 && x.h === 360));
+    ok(all.length === 50 && wrong.length === 0, 'все 25 фото есть в двух размерах (960×720 и 480×360) и открываются' + (wrong.length ? ' ' + JSON.stringify(wrong.slice(0, 3)) : ''));
+    ok(bad.length === 0 && errors.length === 0, 'ошибок загрузки и в консоли нет' + (bad.length || errors.length ? ' ' + JSON.stringify(bad.concat(errors).slice(0, 3)) : ''));
     await ctx.close();
   }
   {
-    // Фото не загрузились — остаётся рисунок, без ошибок в коде.
+    // Фото запрещены — везде рисунки из art.js, без ошибок в коде.
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     const jsErrors = []; page.on('pageerror', e => jsErrors.push(e.message));
     await page.route('**/img/photo/**', r => r.abort());
-    await page.goto(base + '#r/olivier'); await page.waitForTimeout(600);
-    const f = await page.evaluate(() => ({ failed: !!document.querySelector('.ph-failed'), svg: getComputedStyle(document.querySelector('.ph-svg')).display !== 'none', btn: document.querySelector('.ph-ctl-pin').getBoundingClientRect().height }));
-    ok(f.failed && f.svg && f.btn === 0 && jsErrors.length === 0, 'фото не загрузились — рисунок оливье, без кнопки и без ошибок');
-    await page.goto(base + '#c/salads'); await page.waitForTimeout(400);
-    ok(await page.evaluate(() => !!document.querySelector('a[href="#r/olivier"] .rcard-art svg')), 'в списке салатов без фото — рисунок');
+    const check = async (hash, sel, n) => {
+      await page.goto(base + hash);
+      await page.evaluate(() => document.querySelectorAll('#app img.photo').forEach(i => { i.loading = 'eager'; }));
+      await page.waitForFunction(() => !document.querySelector('#app img.photo'), null, { timeout: 5000 }).catch(() => {});
+      return page.evaluate(([sel, n]) => document.querySelectorAll(sel).length === n && !document.querySelector('#app img.photo'), [sel, n]);
+    };
+    ok(await check('', '.hero-art svg, .tile-art svg', 5), 'без фото: на главной рисунки стола и разделов');
+    ok(await check('#c/salads', '.rcard-art svg', 5), 'без фото: в разделе рисунки блюд');
+    ok(await check('#r/olivier', '.r-hero svg', 1), 'без фото: в рецепте рисунок блюда');
+    await page.goto(base + '#menu'); await page.click('[data-act="ready-menu"]');
+    ok(await check('#menu', '.mitem-art svg', 5), 'без фото: в меню рисунки блюд');
+    await layoutCheck(page, 'меню без фото');
+    ok(jsErrors.length === 0, 'без фото — ошибок в коде нет' + (jsErrors.length ? ' ' + JSON.stringify(jsErrors) : ''));
     await page.close();
-  }
-  {
-    // «Уменьшить движение» в настройках телефона: без падения, кнопка просто меняет кадр.
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
-    const page = await ctx.newPage();
-    const errors = watchErrors(page);
-    await page.goto(base + '#r/olivier'); await page.waitForSelector('.ph-ready');
-    const pos = await page.evaluate(() => getComputedStyle(document.querySelector('.ph-pin')).position);
-    await page.evaluate(() => window.scrollTo(0, 300)); await page.waitForTimeout(150);
-    const p1 = await page.evaluate(() => window.NYR_PHOTO.state().p);
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.locator('.ph-btn:visible').click(); await page.waitForTimeout(50);
-    const p2 = await page.evaluate(() => ({ p: window.NYR_PHOTO.state().p, done: document.querySelector('.ph-done').style.opacity, tr: document.querySelector('.ph-band').style.transform }));
-    ok(pos !== 'sticky' && p1 === 0 && p2.p === 1 && p2.done === '1' && p2.tr === 'none', 'без движения: не прилипает, прокрутка не двигает, кнопка сразу показывает салат');
-    ok(errors.length === 0, 'без ошибок' + (errors.length ? ' ' + JSON.stringify(errors) : ''));
-    await ctx.close();
   }
 
   /* ---------- А13: узкий экран 320 px с полным меню ---------- */

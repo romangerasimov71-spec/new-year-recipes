@@ -4,7 +4,6 @@
 
   var D = window.NYR_DATA;
   var ART = window.NYR_ART;
-  var PH = window.NYR_PHOTO || null; // фото-сцена (пока только у оливье)
   var APP_URL = 'https://romangerasimov71-spec.github.io/new-year-recipes/';
   var STORE_KEY = 'nyr.v1';
   var MIN_PEOPLE = 1, MAX_PEOPLE = 40, MAX_WHOLE = 10;
@@ -310,18 +309,44 @@
     return nb(r.time) + ' · ' + nb(r.level) + ' · ' + nb(y).replace('\u00a0—\u00a0', '\u00a0— ');
   }
 
+  /* ---------- Фото блюд (Higgsfield) ----------
+     img/photo/full/<id>.webp — 960×720, img/photo/thumb/<id>.webp — 480×360, всё 4:3.
+     Если фото не загрузилось — на его месте рисунок из art.js (data-fb: dish:<id>, cat:<id>, hero). */
+  var PHOTO = 'img/photo/';
+  function photo(id, size, alt, fb, first, extra) {
+    var w = size === 'full' ? 960 : 480;
+    return '<img class="photo" src="' + PHOTO + size + '/' + id + '.webp"' + (extra || '') +
+      ' alt="' + esc(alt) + '" width="' + w + '" height="' + (w * 3 / 4) + '"' +
+      (first ? ' decoding="async"' : ' loading="lazy" decoding="async"') +
+      ' data-fb="' + fb + '" onerror="NYR_PHOTO_FAIL(this)">';
+  }
+  function fallbackArt(fb) {
+    var k = fb.split(':');
+    if (k[0] === 'cat') return ART.cat(k[1]);
+    if (k[0] === 'hero') return ART.hero();
+    return ART.dish(k[1]);
+  }
+  window.NYR_PHOTO_FAIL = function (img) {
+    var box = img.parentNode;
+    if (!box) return;
+    box.classList.add('photo-failed');
+    box.innerHTML = fallbackArt(img.getAttribute('data-fb') || '');
+  };
+  function dishPhoto(r, size, first) { return photo(r.id, size, r.title, 'dish:' + r.id, first); }
+
   function viewHome() {
     setHeader('Новогодний стол', false);
     var n = state.menu.length;
     var tiles = D.CATEGORIES.map(function (c) {
       var cnt = D.RECIPES.filter(function (r) { return r.cat === c.id; }).length;
       return '<a class="tile" href="#c/' + c.id + '">' +
-        '<span class="tile-art">' + ART.cat(c.id) + '</span>' +
+        '<span class="tile-art">' + photo('cat-' + c.id, 'thumb', c.title, 'cat:' + c.id, false) + '</span>' +
         '<span class="tile-name">' + esc(c.title) + '</span>' +
         '<span class="tile-sub">' + cnt + ' ' + plural(cnt, RECIPE_W) + '</span></a>';
     }).join('');
     return '<section class="hero">' +
-      '<div class="hero-art">' + ART.hero() + '</div>' +
+      '<div class="hero-art">' + photo('hero', 'thumb', 'Праздничный новогодний стол', 'hero', true,
+        ' srcset="' + PHOTO + 'thumb/hero.webp 480w, ' + PHOTO + 'full/hero.webp 960w" sizes="(min-width: 600px) 300px, 100vw" fetchpriority="high"') + '</div>' +
       '<div class="hero-text"><h1>Рецепты к Новому году</h1>' +
       '<p class="lead">Проверенная классика по шагам, меню на праздник и список покупок.</p></div>' +
       '</section>' +
@@ -337,16 +362,13 @@
       '<nav class="tiles" aria-label="Разделы">' + tiles + '</nav>';
   }
 
-  // Маленькая картинка блюда: фото, если есть, иначе рисунок.
-  function dishThumb(r) { return (PH && PH.thumb(r)) || ART.dish(r.id); }
-
   function viewCat(id) {
     var c = CATS.get(id);
     setHeader(c.title, true);
-    var list = D.RECIPES.filter(function (r) { return r.cat === id; }).map(function (r) {
+    var list = D.RECIPES.filter(function (r) { return r.cat === id; }).map(function (r, k) {
       var inMenu = state.menu.indexOf(r.id) >= 0;
       return '<li><a class="rcard" href="#r/' + r.id + '">' +
-        '<span class="rcard-art">' + dishThumb(r) + '</span>' +
+        '<span class="rcard-art">' + dishPhoto(r, 'thumb', k < 4) + '</span>' +
         '<span class="rcard-body"><span class="rcard-title">' + esc(r.title) + '</span>' +
         '<span class="rcard-meta">' + metaLine(r) + '</span>' +
         (inMenu ? '<span class="tag">' + ICON.check + 'В моём меню</span>' : '') +
@@ -401,18 +423,13 @@
     var under = r.whole ? '<p class="note strong" data-testid="whole-note">' + esc(wholeText(r, a)) + '</p>' : '';
     if (state.fromMenu[r.id]) under += '<p class="note from-menu" data-testid="from-menu">' + (r.whole ? 'Хватит ' : 'Количества ') + 'на ' + guestsText(state.guests) + ', как в вашем меню.</p>';
     var yieldTxt = r.whole ? wholeText(r, 1) : r.serves + ' ' + plural(r.serves, PORTION);
-    var head = '<div class="r-head">' +
+    return '<div class="r-top"><div class="r-hero">' + dishPhoto(r, 'full', true) + '</div><div class="r-head">' +
       '<h1 class="page-title">' + esc(r.title) + '</h1>' +
       '<ul class="facts">' +
       '<li><span class="fact-k">Время</span><span class="fact-v">' + esc(r.time) + (r.wait ? ' <span class="wait">' + esc(r.wait) + '</span>' : '') + '</span></li>' +
       '<li><span class="fact-k">Сложность</span><span class="fact-v">' + esc(r.level) + '</span></li>' +
       '<li><span class="fact-k">Выход</span><span class="fact-v">' + esc(yieldTxt) + (r.note ? ' (' + esc(r.note) + ')' : '') + '</span></li>' +
-      '</ul>';
-    // С фото: название и время — над сценой (в альбоме — справа от неё, вместе с кнопкой «Смешать»).
-    var top = r.photo && PH ?
-      '<div class="r-top has-photo">' + head + PH.controls(r, 'side') + '</div>' + PH.scene(r) + '</div>' :
-      '<div class="r-top"><div class="r-hero">' + ART.dish(r.id) + '</div>' + head + '</div></div>';
-    return top +
+      '</ul></div></div>' +
       menuBlock(r, 'Поделиться') +
       '<section class="card"><h2>Ингредиенты</h2>' +
       '<div class="stepper" role="group" aria-label="' + (r.whole ? 'Сколько готовить' : 'Количество порций') + '"><span class="stepper-label">' + label + '</span>' +
@@ -467,7 +484,7 @@
       return '<h2 class="sec-title">' + esc(c.title) + '</h2><ul class="mlist">' + ids.map(function (id) {
         var r = rec(id);
         return '<li class="mitem"><a class="mitem-link" href="#r/' + id + '?from=menu">' +
-          '<span class="mitem-art">' + dishThumb(r) + '</span>' +
+          '<span class="mitem-art">' + dishPhoto(r, 'thumb', false) + '</span>' +
           '<span class="mitem-body"><span class="mitem-title">' + esc(r.title) + '</span>' +
           '<span class="mitem-meta">' + esc(dishAmount(r)) + '</span></span></a>' +
           '<button class="btn btn-small" data-act="menu-remove" data-id="' + id + '" aria-label="Убрать «' + esc(r.title) + '» из меню">Убрать</button></li>';
@@ -543,7 +560,6 @@
     else html = viewHome();
     app.innerHTML = html;
     app.setAttribute('data-view', r.name);
-    if (PH) PH.mount(app, rec);
   }
 
   // Перерисовать текущий экран, сохранив прокрутку и фокус (на ту же кнопку/галочку).
@@ -738,8 +754,7 @@
     'buy-reset': function () { state.bought = dict(); save(); rerender('[data-act="share-shop"]'); },
     'share-recipe': function (el) { var r = rec(el.getAttribute('data-id')); share(r.title, recipeText(r)); },
     'share-menu': function () { share('Наше меню на Новый год', menuText()); },
-    'share-shop': function () { share('Список покупок', shopText()); },
-    'ph-play': function () { if (PH) PH.play(); }
+    'share-shop': function () { share('Список покупок', shopText()); }
   };
   function setGuests(v) {
     state.guests = clamp(v, MIN_PEOPLE, MAX_PEOPLE);
