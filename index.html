@@ -3,11 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- ВК/ОК: VK Bridge лежит рядом (не unpkg) и VKWebAppInit уходит сразу — до картинок и до Playgama Bridge. -->
+<script src="js/vk-bridge.min.js"></script>
+<script src="js/vk-start.js"></script>
+<script src="playgama-bridge.js"></script>
 <title>Новогодний стол: рецепты</title>
 <meta name="description" content="Рецепты к Новому году по шагам: салаты, горячее, закуски, сладкое. Меню на праздник и список покупок.">
 <meta name="theme-color" content="#9E2B25">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 7 16h5l-6 9h20l-6-9h5z' fill='%232E5E45'/%3E%3Ccircle cx='16' cy='4' r='2.5' fill='%23D9A441'/%3E%3Crect x='14' y='25' width='4' height='5' fill='%237A4A2A'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
+<script src="js/config.js" defer></script>
+<script src="js/platform.js" defer></script>
+<script src="js/analytics.js" defer></script>
 <script src="js/recipes.js" defer></script>
 <script src="js/art.js" defer></script>
 <script src="js/app.js" defer></script>
@@ -22,7 +29,7 @@
     <span id="hdr-title" class="hdr-title">Новогодний стол</span>
   </div>
 </header>
-<main id="app" class="wrap"></main>
+<main id="app" class="wrap"><p class="lead boot-note">Открываем рецепты…</p></main>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="copy-modal" class="modal" hidden>
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="copy-title">

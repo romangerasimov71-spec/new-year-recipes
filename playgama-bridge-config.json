@@ -1,0 +1,16 @@
+{
+    "advertisement": {
+        "rewarded": {
+            "placementFallback": "plan",
+            "placements": [
+                { "id": "plan" }
+            ]
+        },
+        "banner": {
+            "placementFallback": "bottom",
+            "placements": [
+                { "id": "bottom" }
+            ]
+        }
+    }
+}
