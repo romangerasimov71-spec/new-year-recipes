@@ -83,6 +83,7 @@ async function layoutCheck(page, label) {
     document.querySelectorAll('#app *, .hdr *').forEach(el => {
       const b = el.getBoundingClientRect();
       if (b.width === 0 || b.height === 0) return;
+      if (el.closest('.gal-track')) return; // кадры ленты листания за краем фото обрезаны нарочно
       if (el.closest('svg') && el.tagName.toLowerCase() !== 'svg') return;
       if (b.right > vw + 1 || b.left < -1) wide.push(el.tagName + '.' + el.className + ' ' + Math.round(b.left) + '..' + Math.round(b.right));
     });
@@ -103,7 +104,7 @@ async function layoutCheck(page, label) {
     }
     // Текст, не влезающий в свой блок (обрезан или вылез наружу).
     document.querySelectorAll('#app *').forEach(el => {
-      if (el.closest('svg') || el.tagName === 'TEXTAREA') return;
+      if (el.closest('svg') || el.tagName === 'TEXTAREA' || el.closest('.gal-view')) return;
       if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0 && getComputedStyle(el).display !== 'inline') wide.push('текст не влез: ' + el.tagName + '.' + el.className + ' ' + el.textContent.trim().slice(0, 20));
     });
     return { overflow: document.documentElement.scrollWidth - vw, wide: wide.slice(0, 5), small: small.slice(0, 5), tiny: tiny.slice(0, 5) };
@@ -736,6 +737,204 @@ async function main() {
     const left = await page.evaluate(() => ({ photos: document.querySelectorAll('.step-photo').length, cards: document.querySelectorAll('.step-li.has-photo').length, steps: document.querySelectorAll('.step').length }));
     ok(left.photos === 0 && left.cards === 0 && left.steps === 5 && jsErrors.length === 0, 'фото шагов не загрузились — блоков фото нет, шаги на месте, ошибок нет');
     await page.close();
+  }
+
+  /* ---------- Листание главного фото (проба: оливье и полено) ---------- */
+  console.log('\nЛистание главного фото');
+  {
+    // Файлы: у рецептов с gallery — кадры 2…N в двух размерах, 960×720 до 150 КБ и 480×360 до 40 КБ.
+    const R = recipeData(), withGal = R.filter(r => r.gallery);
+    ok(withGal.map(r => r.id + ':' + r.gallery).join() === 'olivier:5,buche:5', 'листание только у оливье и полена, по 5 кадров (' + withGal.map(r => r.id + ':' + r.gallery).join() + ')');
+    const bad = [], sizes = { full: [], thumb: [] };
+    for (const r of withGal) for (let n = 2; n <= r.gallery; n++) for (const [sz, lim] of [['full', 150], ['thumb', 40]]) {
+      const f = path.join(ROOT, 'img/photo/gallery', sz, r.id + '-' + n + '.webp');
+      if (!fs.existsSync(f)) { bad.push('нет ' + sz + '/' + r.id + '-' + n); continue; }
+      const s = fs.statSync(f).size; sizes[sz].push(s);
+      if (s > lim * 1024) bad.push(sz + '/' + r.id + '-' + n + ' ' + (s / 1024).toFixed(0) + ' КБ');
+    }
+    console.log('Кадры листания: full самое большое ' + (Math.max(...sizes.full) / 1024).toFixed(1) + ' КБ, thumb ' + (Math.max(...sizes.thumb) / 1024).toFixed(1) + ' КБ');
+    ok(!bad.length, 'кадры листания на месте: full ≤ 150 КБ, thumb ≤ 40 КБ' + (bad.length ? ' ' + bad.join('; ') : ''));
+  }
+  const galInfo = page => page.evaluate(() => {
+    const root = document.querySelector('.r-gal');
+    if (!root) return null;
+    const view = root.querySelector('.gal-view').getBoundingClientRect();
+    const slides = [...root.querySelectorAll('.gal-slide')];
+    // Какой кадр сейчас виден целиком в окне ленты.
+    const shown = slides.find(s => Math.abs(s.getBoundingClientRect().left - view.left) < 2);
+    return { n: slides.length, frames: slides.map(s => +s.dataset.n), count: root.querySelector('.gal-count').textContent,
+      dots: root.querySelectorAll('.gal-dot').length, on: [...root.querySelectorAll('.gal-dot')].findIndex(d => d.classList.contains('on')),
+      shown: shown ? +shown.dataset.n : 0, srcs: slides.map(s => s.querySelector('img').getAttribute('src')),
+      prevOff: root.querySelector('.gal-prev').disabled, nextOff: root.querySelector('.gal-next').disabled,
+      arrows: [...root.querySelectorAll('.gal-arrow')].map(a => { const b = a.getBoundingClientRect(); return { w: b.width, h: b.height, inside: b.left >= view.left && b.right <= view.right && b.top >= view.top && b.bottom <= view.bottom }; }),
+      viewW: view.width };
+  });
+  const settle = page => page.waitForTimeout(450); // доводка ленты — 0,35 с
+  const SHOTS = process.env.GAL_SHOTS || OUT;
+  fs.mkdirSync(SHOTS, { recursive: true });
+  for (const vp of [{ w: 390, h: 844, t: true }, { w: 320, h: 568, t: true }, { w: 844, h: 390, t: true }, { w: 1280, h: 800, t: false }]) {
+    const name = vp.w + '×' + vp.h;
+    const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, hasTouch: vp.t, isMobile: vp.t });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    const req = []; page.on('request', r => { const m = r.url().match(/img\/photo\/(?:gallery\/)?(full|thumb)\/(olivier|buche)(-\d)?\.webp/); if (m) req.push(m[1] + ':' + m[2] + (m[3] || '')); });
+    await page.goto(base + '#r/olivier');
+    await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+    req.length = 0;
+    await page.reload();
+    await page.waitForFunction(() => { const i = document.querySelectorAll('.gal-slide img')[1]; return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 }).catch(() => {});
+    let g = await galInfo(page);
+    ok(g && g.n === 5 && g.dots === 5 && g.count === '1 из 5' && g.shown === 1 && g.on === 0 && g.prevOff && !g.nextOff, name + ': у оливье лента из 5 кадров, «1 из 5», 5 точек, виден главный кадр' + (g ? '' : ' ленты нет'));
+    ok(g && g.srcs[0] === 'img/photo/full/olivier.webp' && g.srcs[1] === 'img/photo/gallery/full/olivier-2.webp' && g.srcs.slice(2).every(s => s === null), name + ': загружены кадр 1 и кадр 2, кадры 3–5 ещё нет ' + JSON.stringify(req));
+    ok(g && g.arrows.every(a => a.w >= 44 && a.h >= 44 && a.inside), name + ': стрелки ‹ › по краям фото, не меньше 44 px');
+    await layoutCheck(page, name + ' рецепт с листанием');
+    await page.screenshot({ path: path.join(SHOTS, 'gal-' + vp.w + 'x' + vp.h + '-frame1.png') });
+    // Стрелки и клавиши.
+    await page.click('.gal-next'); await settle(page);
+    g = await galInfo(page);
+    ok(g.count === '2 из 5' && g.shown === 2 && g.on === 1 && !g.prevOff, name + ': стрелка › — кадр 2, «2 из 5»');
+    ok(g.srcs[2] === 'img/photo/gallery/full/olivier-3.webp' && g.srcs[4] === null, name + ': при приближении подгружается кадр 3, кадр 5 ещё нет');
+    await page.keyboard.press('ArrowRight'); await settle(page);
+    g = await galInfo(page);
+    ok(g.count === '3 из 5' && g.shown === 3, name + ': клавиша → — кадр 3');
+    await page.keyboard.press('ArrowLeft'); await settle(page);
+    ok((await galInfo(page)).count === '2 из 5', name + ': клавиша ← — кадр 2');
+    await page.click('.gal-prev'); await settle(page);
+    ok((await galInfo(page)).count === '1 из 5', name + ': стрелка ‹ — кадр 1');
+    // Палец (или мышь на компьютере): вбок — листает, вверх-вниз — прокручивает страницу.
+    const box = await page.locator('.gal-view').boundingBox();
+    const cy = Math.max(box.y + 20, Math.min(box.y + box.height / 2, vp.h - 20));
+    const cdp = vp.t ? await ctx.newCDPSession(page) : null;
+    const swipe = async (x0, y0, x1, y1) => {
+      if (cdp) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] });
+        for (let i = 1; i <= 12; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + (x1 - x0) * i / 12, y: y0 + (y1 - y0) * i / 12 }] }); await page.waitForTimeout(16); }
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        await page.mouse.move(x0, y0); await page.mouse.down();
+        for (let i = 1; i <= 12; i++) { await page.mouse.move(x0 + (x1 - x0) * i / 12, y0 + (y1 - y0) * i / 12); await page.waitForTimeout(16); }
+        await page.mouse.up();
+      }
+      await settle(page);
+    };
+    await swipe(box.x + box.width * 0.8, cy, box.x + box.width * 0.2, cy + 6);
+    g = await galInfo(page);
+    ok(g.count === '2 из 5' && g.shown === 2 && await page.evaluate(() => document.getElementById('viewer') === null || document.getElementById('viewer').hidden), name + ': ' + (vp.t ? 'свайп' : 'перетаскивание мышью') + ' влево — кадр 2, крупно не открылось');
+    await swipe(box.x + box.width * 0.75, cy, box.x + box.width * 0.25, cy);
+    await swipe(box.x + box.width * 0.75, cy, box.x + box.width * 0.25, cy);
+    ok((await galInfo(page)).count === '4 из 5', name + ': ещё два свайпа — кадр 4');
+    await page.screenshot({ path: path.join(SHOTS, 'gal-' + vp.w + 'x' + vp.h + '-frame4.png') });
+    await swipe(box.x + box.width * 0.25, cy, box.x + box.width * 0.75, cy);
+    ok((await galInfo(page)).count === '3 из 5', name + ': свайп вправо — кадр 3');
+    await swipe(box.x + box.width * 0.55, cy, box.x + box.width * 0.45, cy);
+    ok((await galInfo(page)).shown === 3, name + ': короткий медленный сдвиг — лента возвращается на тот же кадр');
+    if (vp.t) {
+      const y0 = await page.evaluate(() => scrollY);
+      const vy0 = Math.min(box.y + box.height - 10, vp.h - 20), vy1 = Math.max(10, vy0 - 220);
+      await swipe(box.x + box.width / 2, vy0, box.x + box.width / 2 + 12, vy1);
+      const after = await page.evaluate(() => scrollY), g2 = await galInfo(page);
+      ok(after > y0 + 50 && g2.count === '3 из 5' && g2.shown === 3, name + ': свайп вверх по фото прокручивает страницу (' + y0 + ' → ' + after + '), лента не листается');
+      await page.evaluate(() => scrollTo(0, 0)); await page.waitForTimeout(150);
+    }
+    // Нажатие на фото — крупно текущий кадр; внутри листаются кадры ленты с подписями.
+    await page.waitForTimeout(450);
+    await page.locator('.gal-slide[data-n="3"]').click();
+    await page.waitForFunction(() => { const i = document.querySelector('#viewer .viewer-img'); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 }).catch(() => {});
+    const vw = () => page.evaluate(() => { const v = document.getElementById('viewer'); return { open: !v.hidden, count: v.querySelector('.viewer-count').textContent, text: v.querySelector('.viewer-text').textContent, src: v.querySelector('.viewer-img').getAttribute('src'), w: v.querySelector('.viewer-img').naturalWidth }; });
+    let v = await vw();
+    ok(v.open && v.count === '3 из 5' && v.text === 'Порция' && v.src === 'img/photo/gallery/full/olivier-3.webp' && v.w === 960, name + ': нажатие на фото — крупно кадр 3 «Порция» ' + JSON.stringify(v));
+    await page.click('#viewer .viewer-arrow[data-dir="1"]');
+    v = await vw();
+    ok(v.count === '4 из 5' && v.text === 'За столом', name + ': в крупном просмотре › — «За столом»');
+    await page.waitForFunction(() => { const i = document.querySelector('#viewer .viewer-img'); return i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 }).catch(() => {});
+    await page.screenshot({ path: path.join(SHOTS, 'gal-' + vp.w + 'x' + vp.h + '-viewer.png') });
+    await page.keyboard.press('ArrowRight');
+    v = await vw();
+    ok(v.count === '5 из 5' && v.text === 'Подача', name + ': клавиша → — «Подача»');
+    await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft');
+    v = await vw();
+    ok(v.count === '1 из 5' && v.text === 'Готовое блюдо' && v.src === 'img/photo/full/olivier.webp', name + ': кадр 1 крупно — главное фото, «Готовое блюдо»');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+    g = await galInfo(page);
+    const foc = await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('gal-slide') && document.activeElement.dataset.n);
+    ok(g.count === '2 из 5' && g.shown === 2 && foc === '2' && await page.evaluate(() => location.hash) === '#r/olivier', name + ': Escape — лента на последнем кадре из просмотра (2), фокус на нём');
+    // Шаги и фото шагов работают как раньше.
+    await page.locator('.step-photo').nth(0).click();
+    ok((await vw()).count === 'Шаг 1 из 5', name + ': фото шага открывается как раньше («Шаг 1 из 5»)');
+    await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+    await page.locator('.step').nth(0).click();
+    g = await galInfo(page);
+    ok(await page.locator('.step.done').count() === 1 && g.count === '2 из 5', name + ': отметка шага не сбрасывает ленту');
+    // Полено: 5 кадров, до конца — стрелка › исчезает.
+    await page.goto(base + '#r/buche');
+    g = await galInfo(page);
+    ok(g && g.n === 5 && g.count === '1 из 5' && g.srcs[0] === 'img/photo/full/buche.webp', name + ': у полена лента из 5 кадров');
+    for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+    await settle(page);
+    g = await galInfo(page);
+    ok(g.count === '5 из 5' && g.shown === 5 && g.nextOff && g.srcs.every(Boolean), name + ': полено листается до 5 из 5, дальше не едет, все кадры загружены');
+    ok(errors.length === 0, name + ': ошибок в консоли нет' + (errors.length ? ' ' + JSON.stringify(errors.slice(0, 3)) : ''));
+    await ctx.close();
+  }
+  {
+    // У остальных рецептов ленты нет: ни точек, ни стрелок; в списках и меню — только главное фото.
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const errors = watchErrors(page);
+    const galReq = []; page.on('request', r => { if (/img\/photo\/gallery\//.test(r.url())) galReq.push(r.url()); });
+    const R = recipeData(), others = R.filter(r => !r.gallery), withGal = [];
+    await page.goto(base);
+    for (const r of others) {
+      await page.goto(base + '#r/' + r.id);
+      const has = await page.evaluate(() => !!document.querySelector('.r-gal, .gal-arrow, .gal-dot, .gal-count') || !document.querySelector('.r-hero img.photo'));
+      if (has) withGal.push(r.id);
+    }
+    ok(others.length === 38 && !withGal.length && !galReq.length, 'у остальных ' + others.length + ' рецептов ленты нет: одно фото, ни точек, ни стрелок' + (withGal.length ? ' ' + withGal.join() : ''));
+    for (const h of ['#c/salads', '#c/sweets', '#c/trendy']) await page.goto(base + h);
+    await page.goto(base + '#menu');
+    await page.evaluate(() => { const s = { menu: ['olivier', 'buche'], guests: 6 }; localStorage.setItem('nyr.v1', JSON.stringify(s)); });
+    await page.reload();
+    const srcs = await page.evaluate(() => [...document.querySelectorAll('.mitem-art img')].map(i => i.getAttribute('src')));
+    ok(srcs.join() === 'img/photo/thumb/olivier.webp,img/photo/thumb/buche.webp' && !galReq.length, 'в разделах и меню — только главное фото, кадры листания не грузятся');
+    ok(errors.length === 0, 'ошибок нет' + (errors.length ? ' ' + JSON.stringify(errors.slice(0, 3)) : ''));
+    await page.close();
+  }
+  {
+    // Кадр не загрузился — выпадает из ленты без ошибок; не загрузилось ни одного доп. кадра — одно главное фото.
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const errors = watchErrors(page);
+    await page.route('**/img/photo/gallery/*/olivier-3.webp', r => r.abort());
+    await page.goto(base + '#r/olivier');
+    await page.click('.gal-next'); await settle(page);
+    await page.waitForTimeout(300);
+    let g = await galInfo(page);
+    ok(g.n === 4 && g.frames.join() === '1,2,4,5' && g.count === '2 из 4' && g.dots === 4, 'кадр 3 не загрузился — выпал: 4 кадра, «2 из 4» ' + JSON.stringify(g.frames));
+    await page.click('.gal-next'); await settle(page);
+    g = await galInfo(page);
+    ok(g.count === '3 из 4' && g.shown === 4, 'после выпавшего — сразу кадр 4');
+    await page.locator('.gal-slide[data-n="4"]').click();
+    await page.keyboard.press('ArrowLeft');
+    ok(await page.evaluate(() => document.querySelector('#viewer .viewer-text').textContent) === 'Крупно', 'в крупном просмотре выпавшего кадра тоже нет');
+    await page.keyboard.press('Escape');
+    await page.unroute('**/img/photo/gallery/*/olivier-3.webp');
+    await page.route('**/img/photo/gallery/**', r => r.abort());
+    await page.goto(base + '#r/buche');
+    for (let i = 0; i < 5; i++) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(80); }
+    await page.waitForFunction(() => document.querySelectorAll('.gal-slide').length === 1, null, { timeout: 5000 }).catch(() => {});
+    g = await galInfo(page);
+    const vis = await page.evaluate(() => [...document.querySelectorAll('.gal-arrow, .gal-bar')].filter(e => e.offsetParent).length);
+    ok(g && g.n === 1 && g.shown === 1 && vis === 0, 'доп. кадры не загрузились — остаётся главное фото, без точек и стрелок');
+    ok(errors.filter(e => !/net::ERR_FAILED/.test(e)).length === 0, 'ошибок в коде нет');
+    await page.close();
+    // Новая вкладка (без памяти браузера): не загрузилось ни одного кадра, даже главного.
+    const p2 = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const e2 = watchErrors(p2);
+    await p2.route(/img\/photo\/(gallery\/)?(full|thumb)\/buche(-\d)?\.webp/, r => r.abort());
+    await p2.goto(base + '#r/buche');
+    await p2.waitForFunction(() => !document.querySelector('.r-gal'), null, { timeout: 5000 }).catch(() => {});
+    ok(await p2.locator('.r-hero svg').count() === 1 && await p2.locator('.r-gal').count() === 0, 'не загрузилось ничего — рисунок, как у рецептов без фото');
+    ok(e2.filter(e => !/net::ERR_FAILED/.test(e)).length === 0, 'ошибок в коде нет');
+    await p2.close();
   }
 
   /* ---------- А13: узкий экран 320 px с полным меню ---------- */

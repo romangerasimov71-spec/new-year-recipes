@@ -376,6 +376,132 @@
     li.classList.remove('has-photo');
   };
 
+  /* ---------- Листание главного фото рецепта ----------
+     У рецепта gallery: N — всего кадров вместе с главным. Кадр 1 — главное фото img/photo/<size>/<id>.webp,
+     кадры 2…N — img/photo/gallery/<size>/<id>-<n>.webp (960×720 и 480×360).
+     Кадр 1 грузится сразу, кадр 2 — после показа страницы, остальные — когда до них близко.
+     Кадр, который не загрузился, выпадает из ленты; если не загрузилось ничего — рисунок, как у всех. */
+  var GAL_CAPTION = { 1: 'Готовое блюдо', 2: 'Крупно', 3: 'Порция', 4: 'За столом', 5: 'Подача' };
+  var galMem = dict(); // id → { pos, failed: [номера кадров], loaded: [номера кадров] } — только в памяти
+  function galCount(r) {
+    var n = r.gallery;
+    return typeof n === 'number' && n >= 2 && r.photo !== false ? Math.min(Math.floor(n), 12) : 0;
+  }
+  function galState(id) { return galMem[id] || (galMem[id] = { pos: 0, failed: [], loaded: [] }); }
+  function galFrames(r) {
+    var g = galState(r.id), out = [];
+    for (var n = 1; n <= galCount(r); n++) if (g.failed.indexOf(n) < 0) out.push(n);
+    return out;
+  }
+  function galSrc(id, n, size) { return n === 1 ? PHOTO + size + '/' + id + '.webp' : PHOTO + 'gallery/' + size + '/' + id + '-' + n + '.webp'; }
+  function galCaption(n) { return GAL_CAPTION[n] || 'Фото ' + n; }
+  function galAlt(r, n) { return n === 1 ? r.title : r.title + ' — ' + galCaption(n).toLowerCase(); }
+  function galDots(count, pos) {
+    var s = '';
+    for (var k = 0; k < count; k++) s += '<span class="gal-dot' + (k === pos ? ' on' : '') + '"></span>';
+    return s;
+  }
+  // Главное фото на странице рецепта: обычное фото или лента с листанием.
+  function recipeHero(r) {
+    if (!galCount(r)) return '<div class="r-hero">' + dishPhoto(r, 'full', true) + '</div>';
+    var frames = galFrames(r), g = galState(r.id);
+    if (!frames.length) return '<div class="r-hero photo-failed">' + ART.dish(r.id) + '</div>';
+    var pos = g.pos = clamp(g.pos, 0, frames.length - 1), many = frames.length > 1;
+    var slides = frames.map(function (n, k) {
+      var cur = k === pos;
+      if (cur && g.loaded.indexOf(n) < 0) g.loaded.push(n);
+      return '<button class="gal-slide" type="button" data-act="gal-open" data-id="' + r.id + '" data-n="' + n + '"' +
+        (cur ? '' : ' tabindex="-1" aria-hidden="true"') + ' aria-label="Открыть фото крупно: ' + esc(galAlt(r, n)) + '">' +
+        '<img class="photo" ' + (g.loaded.indexOf(n) >= 0 ? 'src' : 'data-src') + '="' + galSrc(r.id, n, 'full') + '" alt="' + esc(galAlt(r, n)) + '"' +
+        ' width="960" height="720" decoding="async" draggable="false" onerror="NYR_GAL_FAIL(this)"></button>';
+    }).join('');
+    return '<div class="r-gal" data-gal="' + r.id + '">' +
+      '<div class="r-hero gal" role="group" aria-roledescription="листание фото" aria-label="Фото блюда: ' + esc(r.title) + '">' +
+        '<div class="gal-view"><div class="gal-track" style="transform:translateX(' + (-pos * 100) + '%)">' + slides + '</div></div>' +
+        '<button class="gal-arrow gal-prev" type="button" data-act="gal-prev" data-id="' + r.id + '" aria-label="Предыдущее фото"' +
+          (pos === 0 ? ' disabled' : '') + (many ? '' : ' hidden') + '>‹</button>' +
+        '<button class="gal-arrow gal-next" type="button" data-act="gal-next" data-id="' + r.id + '" aria-label="Следующее фото"' +
+          (pos === frames.length - 1 ? ' disabled' : '') + (many ? '' : ' hidden') + '>›</button>' +
+      '</div>' +
+      '<div class="gal-bar"' + (many ? '' : ' hidden') + '><span class="gal-dots" aria-hidden="true">' + galDots(frames.length, pos) + '</span>' +
+        '<span class="gal-count" data-testid="gal-count" aria-live="polite">' + (pos + 1) + ' из ' + frames.length + '</span></div>' +
+    '</div>';
+  }
+  function galRoot() { return app.querySelector('.r-gal'); }
+  function galSlides(root) { return Array.prototype.slice.call(root.querySelectorAll('.gal-slide')); }
+  function galLoadSlide(root, s) {
+    var img = s && s.querySelector('img[data-src]');
+    if (!img) return;
+    var g = galState(root.getAttribute('data-gal')), n = +s.getAttribute('data-n');
+    if (g.loaded.indexOf(n) < 0) g.loaded.push(n);
+    img.setAttribute('src', img.getAttribute('data-src'));
+    img.removeAttribute('data-src');
+  }
+  function galLoadAround(root, pos) {
+    var slides = galSlides(root);
+    [pos, pos + 1, pos - 1].forEach(function (p) { if (p >= 0 && p < slides.length) galLoadSlide(root, slides[p]); });
+  }
+  // Показать кадр pos (с плавной доводкой; instant — сразу, без анимации).
+  function galShow(pos, instant) {
+    var root = galRoot();
+    if (!root) return;
+    var g = galState(root.getAttribute('data-gal')), slides = galSlides(root), n = slides.length;
+    if (!n) return;
+    pos = g.pos = clamp(pos, 0, n - 1);
+    var track = root.querySelector('.gal-track');
+    if (instant) track.classList.add('dragging'); else track.classList.remove('dragging');
+    track.style.transform = 'translateX(' + (-pos * 100) + '%)';
+    if (instant) { void track.offsetWidth; track.classList.remove('dragging'); }
+    slides.forEach(function (s, k) {
+      if (k === pos) { s.removeAttribute('tabindex'); s.removeAttribute('aria-hidden'); }
+      else { s.setAttribute('tabindex', '-1'); s.setAttribute('aria-hidden', 'true'); }
+    });
+    var prev = root.querySelector('.gal-prev'), next = root.querySelector('.gal-next'), bar = root.querySelector('.gal-bar');
+    var focusLost = document.activeElement === prev && pos === 0 || document.activeElement === next && pos === n - 1;
+    prev.disabled = pos === 0; next.disabled = pos === n - 1;
+    prev.hidden = next.hidden = bar.hidden = n < 2;
+    root.querySelector('.gal-dots').innerHTML = galDots(n, pos);
+    root.querySelector('.gal-count').textContent = (pos + 1) + ' из ' + n;
+    if (focusLost) slides[pos].focus({ preventScroll: true });
+    galLoadAround(root, pos);
+  }
+  // Кадр не загрузился: убрать из ленты (и запомнить, чтобы не показывать после перерисовки).
+  function galDrop(id, n) {
+    var g = galState(id);
+    if (g.failed.indexOf(n) < 0) g.failed.push(n);
+    var root = app.querySelector('.r-gal[data-gal="' + id + '"]');
+    if (!root) return;
+    var slides = galSlides(root), s = root.querySelector('.gal-slide[data-n="' + n + '"]'), k = slides.indexOf(s);
+    if (k < 0) return;
+    var hadFocus = s.contains(document.activeElement);
+    s.parentNode.removeChild(s);
+    if (slides.length === 1) { // не загрузилось ничего — рисунок вместо фото, как у рецептов без листания
+      var box = document.createElement('div');
+      box.className = 'r-hero photo-failed';
+      box.innerHTML = ART.dish(id);
+      root.parentNode.replaceChild(box, root);
+      return;
+    }
+    galShow(k < g.pos ? g.pos - 1 : g.pos, true);
+    if (hadFocus) galSlides(root)[g.pos].focus({ preventScroll: true });
+  }
+  window.NYR_GAL_FAIL = function (img) {
+    var s = img.closest ? img.closest('.gal-slide') : null, src = img.getAttribute('src') || '';
+    if (!s) return;
+    if (src.indexOf('/full/') >= 0) { img.setAttribute('src', src.replace('/full/', '/thumb/')); return; } // сначала маленькое
+    var root = s.closest('.r-gal');
+    if (root) galDrop(root.getAttribute('data-gal'), +s.getAttribute('data-n'));
+  };
+  // После показа страницы — подгрузить соседний кадр (когда текущий загрузился).
+  function galInit() {
+    var root = galRoot();
+    if (!root) return;
+    var g = galState(root.getAttribute('data-gal')), cur = galSlides(root)[g.pos], img = cur && cur.querySelector('img');
+    if (!img) return;
+    var go = function () { if (root.isConnected !== false && document.contains(root)) galLoadAround(root, g.pos); };
+    if (img.complete) setTimeout(go, 0); else { img.addEventListener('load', go); img.addEventListener('error', go); }
+  }
+
   function viewHome() {
     setHeader('Новогодний стол', false);
     var n = state.menu.length;
@@ -492,7 +618,7 @@
     var under = r.whole ? '<p class="note strong" data-testid="whole-note">' + esc(wholeText(r, a)) + '</p>' : '';
     if (state.fromMenu[r.id]) under += '<p class="note from-menu" data-testid="from-menu">' + (r.whole ? 'Хватит ' : 'Количества ') + 'на ' + guestsText(state.guests) + ', как в вашем меню.</p>';
     var yieldTxt = r.whole ? wholeText(r, 1) : portionsOf(r, r.serves);
-    return '<div class="r-top"><div class="r-hero">' + dishPhoto(r, 'full', true) + '</div><div class="r-head">' +
+    return '<div class="r-top">' + recipeHero(r) + '<div class="r-head">' +
       '<h1 class="page-title">' + esc(r.title) + '</h1>' +
       '<ul class="facts">' +
       '<li><span class="fact-k">Время</span><span class="fact-v">' + esc(r.time) + (r.wait ? ' <span class="wait">' + esc(r.wait) + '</span>' : '') + '</span></li>' +
@@ -621,6 +747,7 @@
       } else if (state.fromMenu[r.id]) {
         delete state.portions[r.id]; delete state.fromMenu[r.id];
       }
+      galState(r.id).pos = 0; // открыли рецепт заново — лента с главного фото
     }
     var html;
     if (r.name === 'cat') html = viewCat(r.id);
@@ -630,6 +757,7 @@
     else html = viewHome();
     app.innerHTML = html;
     app.setAttribute('data-view', r.name);
+    galInit();
   }
 
   // Перерисовать текущий экран, сохранив прокрутку и фокус (на ту же кнопку/галочку).
@@ -747,10 +875,13 @@
       f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
     }
   });
-  /* ---------- Просмотр фото шага крупно ----------
-     Тёмный фон, фото по центру, текст шага снизу (в альбоме — справа), «✕ Закрыть», стрелки и свайп.
+  /* ---------- Просмотр фото крупно (фото шагов и кадры листания главного фото) ----------
+     Тёмный фон, фото по центру, текст снизу (в альбоме — справа), «✕ Закрыть», стрелки и свайп.
      Открытие кладёт запись в историю: системная «назад» закрывает просмотр и оставляет на рецепте. */
-  var V = null; // { el, img, r, list: [номера шагов с 0], pos, ret, pushed }
+  // V: { kind: 'steps' | 'gal', el, img, r, list, pos, ret, pushed }
+  //   steps — list: номера шагов с фото (с 0); gal — list: номера кадров ленты (с 1).
+  var V = null;
+  function viewerSrc(v, size) { return v.kind === 'gal' ? galSrc(v.r.id, v.list[v.pos], size) : stepPhotoSrc(v.r, v.list[v.pos], size); }
   function viewerEl() {
     var el = document.getElementById('viewer');
     if (el) return el;
@@ -761,11 +892,11 @@
       '<div class="viewer-stage"><img class="viewer-img" alt=""></div>' +
       '<div class="viewer-side">' +
         '<div class="viewer-top"><span id="viewer-count" class="viewer-count"></span>' +
-        '<button class="viewer-btn viewer-close" type="button">\u2715 Закрыть</button></div>' +
+        '<button class="viewer-btn viewer-close" type="button">✕ Закрыть</button></div>' +
         '<p class="viewer-text"></p>' +
         '<div class="viewer-nav">' +
-          '<button class="viewer-btn viewer-arrow" type="button" data-dir="-1" aria-label="Предыдущий шаг">\u2039</button>' +
-          '<button class="viewer-btn viewer-arrow" type="button" data-dir="1" aria-label="Следующий шаг">\u203A</button>' +
+          '<button class="viewer-btn viewer-arrow" type="button" data-dir="-1" aria-label="Предыдущий шаг">‹</button>' +
+          '<button class="viewer-btn viewer-arrow" type="button" data-dir="1" aria-label="Следующий шаг">›</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(el);
@@ -788,25 +919,50 @@
       if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { e.preventDefault(); viewerStep(dx < 0 ? 1 : -1); }
     });
     el.querySelector('.viewer-img').addEventListener('error', function () {
-      // Большое фото не загрузилось — показываем маленькое; если и его нет — только текст.
-      var img = this, small = stepPhotoSrc(V.r, V.list[V.pos], 'thumb');
-      if (img.getAttribute('src') !== small) img.setAttribute('src', small); else img.hidden = true;
+      if (!V) return;
+      // Большое фото не загрузилось — показываем маленькое.
+      var img = this, src = img.getAttribute('src'), big = viewerSrc(V, 'full'), small = viewerSrc(V, 'thumb');
+      if (src === big) { img.setAttribute('src', small); return; }
+      if (src !== small) return; // ошибка от прежнего фото — уже листнули дальше
+      if (V.kind !== 'gal') { img.hidden = true; return; } // фото шага: остаётся текст шага
+      // Кадр ленты не загрузился совсем — выпадает и из просмотра, и из ленты на странице.
+      var n = V.list[V.pos];
+      V.list.splice(V.pos, 1);
+      galDrop(V.r.id, n);
+      if (!V.list.length) { closeViewer(); return; }
+      if (V.pos >= V.list.length) V.pos = V.list.length - 1;
+      showViewerStep();
     });
     return el;
   }
   function showViewerStep() {
-    var r = V.r, k = V.list[V.pos], img = V.img;
+    var r = V.r, k = V.list[V.pos], img = V.img, gal = V.kind === 'gal';
     img.hidden = false;
-    img.setAttribute('src', stepPhotoSrc(r, k, 'full'));
-    img.setAttribute('alt', stepAlt(r, k));
-    V.el.querySelector('.viewer-count').textContent = 'Шаг ' + (k + 1) + ' из ' + r.steps.length;
-    V.el.querySelector('.viewer-text').textContent = r.steps[k];
+    img.setAttribute('src', viewerSrc(V, 'full'));
+    img.setAttribute('alt', gal ? galAlt(r, k) : stepAlt(r, k));
+    V.el.querySelector('.viewer-count').textContent = gal ? (V.pos + 1) + ' из ' + V.list.length : 'Шаг ' + (k + 1) + ' из ' + r.steps.length;
+    var text = V.el.querySelector('.viewer-text');
+    text.textContent = gal ? galCaption(k) : r.steps[k];
+    text.classList.toggle('viewer-caption', gal);
     var arrows = V.el.querySelectorAll('.viewer-arrow');
     arrows[0].disabled = V.pos === 0;
     arrows[1].disabled = V.pos === V.list.length - 1;
+    arrows[0].setAttribute('aria-label', gal ? 'Предыдущее фото' : 'Предыдущий шаг');
+    arrows[1].setAttribute('aria-label', gal ? 'Следующее фото' : 'Следующий шаг');
     V.el.querySelector('.viewer-nav').hidden = V.list.length < 2;
     // Соседние фото — заранее, чтобы листалось без ожидания.
-    [V.pos - 1, V.pos + 1].forEach(function (p) { if (p >= 0 && p < V.list.length) (new Image()).src = stepPhotoSrc(r, V.list[p], 'full'); });
+    [V.pos - 1, V.pos + 1].forEach(function (p) {
+      if (p >= 0 && p < V.list.length) (new Image()).src = viewerSrc({ kind: V.kind, r: r, list: V.list, pos: p }, 'full');
+    });
+  }
+  function openViewerWith(kind, r, list, pos, from) {
+    var el = viewerEl();
+    V = { kind: kind, el: el, img: el.querySelector('.viewer-img'), r: r, list: list, pos: pos, ret: from, pushed: false };
+    showViewerStep();
+    el.hidden = false;
+    document.documentElement.classList.add('viewer-open');
+    try { history.pushState(Object.assign({}, history.state || {}, { viewer: true }), ''); V.pushed = true; } catch (e) { /* без истории — закрытие кнопкой */ }
+    el.querySelector('.viewer-close').focus();
   }
   function openViewer(id, k, from) {
     var r = rec(id);
@@ -814,13 +970,15 @@
     // Только шаги, у которых фото есть на странице (не загрузившиеся уже убраны).
     var list = Array.prototype.map.call(app.querySelectorAll('.step-photo[data-id="' + id + '"]'), function (b) { return +b.getAttribute('data-i'); });
     if (list.indexOf(k) < 0) return;
-    var el = viewerEl();
-    V = { el: el, img: el.querySelector('.viewer-img'), r: r, list: list, pos: list.indexOf(k), ret: from, pushed: false, ignorePop: false };
-    showViewerStep();
-    el.hidden = false;
-    document.documentElement.classList.add('viewer-open');
-    try { history.pushState(Object.assign({}, history.state || {}, { viewer: true }), ''); V.pushed = true; } catch (e) { /* без истории — закрытие кнопкой */ }
-    el.querySelector('.viewer-close').focus();
+    openViewerWith('steps', r, list, list.indexOf(k), from);
+  }
+  // Нажали на главное фото с листанием — крупно текущий кадр, внутри листаются кадры ленты.
+  function openGallery(id, n, from) {
+    var r = rec(id), root = app.querySelector('.r-gal[data-gal="' + id + '"]');
+    if (!r || !root) return;
+    var list = galSlides(root).map(function (s) { return +s.getAttribute('data-n'); });
+    if (list.indexOf(n) < 0) return;
+    openViewerWith('gal', r, list, list.indexOf(n), from);
   }
   function viewerStep(d) {
     if (!V) return;
@@ -834,8 +992,20 @@
     v.el.hidden = true;
     v.img.removeAttribute('src');
     document.documentElement.classList.remove('viewer-open');
-    // Фокус — на фото того шага, который смотрели последним.
-    var back = app.querySelector('.step-photo[data-id="' + v.r.id + '"][data-i="' + v.list[v.pos] + '"]') || v.ret;
+    var back;
+    if (v.kind === 'gal') {
+      // Лента на странице встаёт на тот кадр, который смотрели последним; фокус — на него.
+      var root = app.querySelector('.r-gal[data-gal="' + v.r.id + '"]');
+      if (root && v.list.length) {
+        var k = galSlides(root).map(function (s) { return +s.getAttribute('data-n'); }).indexOf(v.list[Math.min(v.pos, v.list.length - 1)]);
+        if (k >= 0) galShow(k, true);
+        back = galSlides(root)[galState(v.r.id).pos];
+      }
+    } else {
+      // Фокус — на фото того шага, который смотрели последним.
+      back = app.querySelector('.step-photo[data-id="' + v.r.id + '"][data-i="' + v.list[v.pos] + '"]');
+    }
+    back = back || v.ret;
     if (back && document.contains(back)) back.focus({ preventScroll: false });
     return v;
   }
@@ -862,6 +1032,65 @@
       e.preventDefault();
       if (f.length) f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
     }
+  });
+
+  /* ---------- Листание главного фото: палец, мышь, клавиши ----------
+     Палец влево/вправо — лента едет за пальцем и доводится до ближайшего кадра.
+     Палец вверх/вниз — обычная прокрутка страницы (touch-action: pan-y), лента не трогается. */
+  var galDrag = null, galNoClickUntil = 0;
+  document.addEventListener('pointerdown', function (e) {
+    // Тянуть можно за любое место фото, в том числе начиная со стрелки.
+    var hero = e.target.closest ? e.target.closest('.r-gal .r-hero') : null;
+    if (!hero || !e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    var root = hero.closest('.r-gal'), view = hero.querySelector('.gal-view'), n = galSlides(root).length;
+    if (n < 2) return;
+    galDrag = { view: view, root: root, track: view.querySelector('.gal-track'), id: e.pointerId, x: e.clientX, y: e.clientY,
+      t: Date.now(), w: view.clientWidth || 1, n: n, on: false, dx: 0 };
+  });
+  document.addEventListener('pointermove', function (e) {
+    var d = galDrag;
+    if (!d || e.pointerId !== d.id) return;
+    var dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (!d.on) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dy) >= Math.abs(dx)) { galDrag = null; return; } // больше вверх-вниз — это прокрутка страницы
+      d.on = true;
+      d.track.classList.add('dragging');
+      try { d.view.setPointerCapture(e.pointerId); } catch (err) { /* и без захвата работает */ }
+      galLoadAround(d.root, galState(d.root.getAttribute('data-gal')).pos);
+    }
+    var pos = galState(d.root.getAttribute('data-gal')).pos;
+    if ((pos === 0 && dx > 0) || (pos === d.n - 1 && dx < 0)) dx = dx / 3; // на краю — упруго, дальше не едет
+    d.dx = dx;
+    d.track.style.transform = 'translateX(calc(' + (-pos * 100) + '% + ' + Math.round(dx) + 'px))';
+    if (e.cancelable) e.preventDefault();
+  });
+  function galDragEnd(e, cancel) {
+    var d = galDrag;
+    if (!d || e.pointerId !== d.id) return;
+    galDrag = null;
+    if (!d.on) return;
+    galNoClickUntil = Date.now() + 400; // после перетаскивания нажатие не открывает фото крупно
+    if (!document.contains(d.root)) return;
+    var pos = galState(d.root.getAttribute('data-gal')).pos, v = d.dx / Math.max(1, Date.now() - d.t), go = 0;
+    if (!cancel && (Math.abs(d.dx) > d.w * 0.2 || (Math.abs(d.dx) > 30 && Math.abs(v) > 0.3))) go = d.dx < 0 ? 1 : -1;
+    galShow(pos + go);
+  }
+  document.addEventListener('pointerup', function (e) { galDragEnd(e, false); });
+  document.addEventListener('pointercancel', function (e) { galDragEnd(e, true); });
+  window.addEventListener('click', function (e) {
+    if (Date.now() < galNoClickUntil && e.target.closest && e.target.closest('.r-gal')) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+  // Клавиши ← → на странице рецепта листают ленту (если не открыт просмотр или окно).
+  document.addEventListener('keydown', function (e) {
+    if (V || !modal.hidden || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    var root = galRoot();
+    if (!root) return;
+    e.preventDefault();
+    galShow(galState(root.getAttribute('data-gal')).pos + (e.key === 'ArrowRight' ? 1 : -1));
   });
 
   function copyText(text) {
@@ -938,6 +1167,9 @@
       save(); rerender();
     },
     'step-photo': function (el) { openViewer(el.getAttribute('data-id'), +el.getAttribute('data-i'), el); },
+    'gal-open': function (el) { openGallery(el.getAttribute('data-id'), +el.getAttribute('data-n'), el); },
+    'gal-prev': function () { var root = galRoot(); if (root) galShow(galState(root.getAttribute('data-gal')).pos - 1); },
+    'gal-next': function () { var root = galRoot(); if (root) galShow(galState(root.getAttribute('data-gal')).pos + 1); },
     'steps-reset': function (el) { delete state.steps[el.getAttribute('data-id')]; save(); rerender('.step'); },
     'buy-reset': function () { state.bought = dict(); save(); rerender('[data-act="share-shop"]'); },
     'share-recipe': function (el) { var r = rec(el.getAttribute('data-id')); share(r.title, recipeText(r)); },

@@ -222,6 +222,40 @@ svg { display: block; }
 /* ---------- Рецепт ---------- */
 .r-hero { border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin: 4px 0 6px; background: var(--photo-bg); }
 .r-hero svg { width: 100%; height: auto; max-height: 340px; overflow: visible; }
+/* Листание главного фото (у рецептов с gallery): лента кадров, стрелки по краям, под фото точки и «1 из 5». */
+.r-gal { margin: 4px 0 6px; min-width: 0; }
+.r-gal .r-hero {
+  margin: 0; position: relative;
+  touch-action: pan-y; /* вверх-вниз — прокрутка страницы, вбок — листание */
+  -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.gal-view { overflow: hidden; overflow: clip; border-radius: inherit; }
+.gal-arrow { touch-action: pan-y; }
+.gal-track { display: flex; transition: transform .35s cubic-bezier(.22, .7, .3, 1); }
+.gal-track.dragging { transition: none; }
+.gal-slide {
+  flex: 0 0 100%; width: 100%; display: block; padding: 0; margin: 0; border: 0; border-radius: 0;
+  background: var(--photo-bg); cursor: zoom-in;
+}
+.gal-slide img { pointer-events: none; -webkit-user-drag: none; }
+.gal-slide img:not([src]) { visibility: hidden; }
+.gal-slide:focus-visible { outline-offset: -4px; }
+.gal-arrow {
+  position: absolute; top: 50%; margin-top: -26px; width: 52px; height: 52px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .7); background: rgba(30, 20, 14, .45); color: #fff;
+  font-size: 38px; line-height: 1; padding: 0 0 5px; display: flex; align-items: center; justify-content: center;
+}
+.gal-prev { left: 10px; padding-right: 3px; }
+.gal-next { right: 10px; padding-left: 3px; }
+.gal-arrow:disabled { visibility: hidden; }
+.gal-arrow:active { background: rgba(30, 20, 14, .72); }
+@media (hover: hover) { .gal-arrow:hover { background: rgba(30, 20, 14, .65); } }
+.gal-arrow[hidden], .gal-bar[hidden] { display: none; }
+.gal-bar { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px; }
+.gal-dots { display: flex; align-items: center; gap: 8px; }
+.gal-dot { width: 10px; height: 10px; border-radius: 5px; background: #D6C2A6; transition: width .2s, background .2s; }
+.gal-dot.on { width: 26px; background: var(--red); }
+.gal-count { font-size: 18px; font-weight: 700; color: var(--muted); white-space: nowrap; }
 .facts {
   list-style: none; padding: 0; margin: 0;
   display: grid; grid-template-columns: 1fr; gap: 6px;
@@ -311,6 +345,7 @@ html.viewer-open, html.viewer-open body { overflow: hidden; }
 .viewer-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; order: -1; }
 .viewer-count { font-size: 20px; font-weight: 700; }
 .viewer-text { margin: 0; font-size: 19px; line-height: 1.45; max-height: 30vh; overflow-y: auto; }
+.viewer-text.viewer-caption { font-family: Georgia, "Times New Roman", "PT Serif", serif; font-size: 24px; font-weight: 700; }
 .viewer-nav { display: flex; gap: 12px; }
 .viewer-nav[hidden] { display: none; }
 .viewer-btn {
@@ -470,6 +505,12 @@ html.viewer-open, html.viewer-open body { overflow: hidden; }
   .hero { grid-template-columns: 200px 1fr; }
   .r-top { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: center; }
   .r-top .r-hero { margin: 0; }
+  .r-top .r-gal { margin: 0; }
+  .gal-arrow { width: 48px; height: 48px; margin-top: -24px; font-size: 34px; }
+  .gal-prev { left: 6px; } .gal-next { right: 6px; }
+  .gal-bar { margin-top: 6px; gap: 8px; }
+  .gal-dots { gap: 6px; }
+  .gal-dot.on { width: 20px; }
   .r-top .page-title { margin-top: 0; }
   .r-top .facts { grid-template-columns: 1fr; gap: 2px; }
   .r-top .facts li { display: flex; }
