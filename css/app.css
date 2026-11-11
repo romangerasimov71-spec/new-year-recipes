@@ -474,6 +474,7 @@ html.viewer-open, html.viewer-open body { overflow: hidden; }
   .r-top .facts { grid-template-columns: 1fr; gap: 2px; }
   .r-top .facts li { display: flex; }
   .r-top .fact-k { display: inline; min-width: 6.2em; }
+  .feature-art { width: 130px; }
 }
 @media (max-height: 640px) and (max-width: 599px) {
   .hero-art .photo { aspect-ratio: 3 / 1; }
@@ -489,9 +490,10 @@ html.viewer-open, html.viewer-open body { overflow: hidden; }
   .page-title { font-size: 26px; }
   .big-btn { font-size: 19px; }
   .rcard-art { width: 88px; }
-  .feature-art { width: 92px; }
-  .feature-name { font-size: 23px; }
-  .feature { gap: 10px; }
+  .feature-art { width: 80px; }
+  .feature-name { font-size: 22px; }
+  .feature { gap: 10px; padding-right: 8px; }
+  .feature-go { font-size: 32px; padding: 0 0 3px; }
   .rcard-title { font-size: 20px; }
   .mitem-title { font-size: 19px; }
   .stepper .round { width: 52px; height: 52px; }

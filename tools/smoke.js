@@ -130,8 +130,12 @@ async function main() {
     // Фото шагов: у каждого рецепта есть, файлы на месте, лишних файлов нет, full ≤ 150 КБ, thumb ≤ 40 КБ.
     const R = recipeData(), want = [];
     R.forEach(r => stepNums(r).forEach(n => want.push(r.id + '-' + n + '.webp')));
-    const noPhotos = R.filter(r => !stepNums(r).length).map(r => r.id);
-    ok(R.length === 20 && !noPhotos.length, 'фото шагов есть у всех ' + R.length + ' рецептов' + (noPhotos.length ? ' нет у: ' + noPhotos.join() : ''));
+    // Рецепты с photo: false (пока «Модный стол») — без фото: им stepPhotos не нужен.
+    const withPh = R.filter(r => r.photo !== false), noPh = R.filter(r => r.photo === false);
+    const noPhotos = withPh.filter(r => !stepNums(r).length).map(r => r.id);
+    ok(withPh.length === 20 && !noPhotos.length, 'фото шагов есть у всех ' + withPh.length + ' рецептов с фото' + (noPhotos.length ? ' нет у: ' + noPhotos.join() : ''));
+    const early = noPh.filter(r => stepNums(r).length).map(r => r.id);
+    ok(noPh.length === 20 && !early.length, 'у 20 рецептов без фото (photo: false) нет и фото шагов' + (early.length ? ': ' + early.join() : ''));
     for (const [sz, lim] of [['full', 150], ['thumb', 40]]) {
       const dir = path.join(ROOT, 'img/photo/steps', sz), have = fs.readdirSync(dir).filter(f => f.endsWith('.webp'));
       const missing = want.filter(f => !have.includes(f)), extra = have.filter(f => !want.includes(f));
@@ -167,13 +171,23 @@ async function main() {
       const perCat = {};
       D.RECIPES.forEach(r => { perCat[r.cat] = (perCat[r.cat] || 0) + 1; });
       const ids = D.RECIPES.map(r => r.id);
-      return { n: D.RECIPES.length, perCat, bad, unique: new Set(ids).size === ids.length, ids };
+      const tr = D.RECIPES.filter(r => r.cat === 'trendy');
+      const also = {};
+      tr.forEach(r => { also[r.alsoIn || '-'] = (also[r.alsoIn || '-'] || 0) + 1; });
+      const badAlso = tr.filter(r => r.alsoIn && ['salads', 'hot', 'snacks', 'sweets'].indexOf(r.alsoIn) < 0).map(r => r.id);
+      const drinks = tr.filter(r => !r.alsoIn).map(r => r.id).sort().join();
+      const withPhoto = D.RECIPES.filter(r => r.photo !== false).map(r => r.id);
+      const cat = D.CATEGORIES.find(c => c.id === 'trendy');
+      return { n: D.RECIPES.length, perCat, bad, unique: new Set(ids).size === ids.length, ids, withPhoto, also, badAlso, drinks,
+        cat: cat && cat.title + '|' + cat.sub + '|' + !!cat.featured, trPhoto: tr.every(r => r.photo === false) };
     });
-    ok(d.n === 20, 'рецептов 20 (' + d.n + ')');
-    ok(Object.values(d.perCat).every(v => v === 5) && Object.keys(d.perCat).length === 4, 'по 5 в каждом разделе ' + JSON.stringify(d.perCat));
+    ok(d.n === 40, 'рецептов 40 (' + d.n + ')');
+    ok(['salads', 'hot', 'snacks', 'sweets'].every(c => d.perCat[c] === 5) && d.perCat.trendy === 20 && Object.keys(d.perCat).length === 5, 'по 5 в базовых разделах и 20 в «Модном столе» ' + JSON.stringify(d.perCat));
+    ok(d.cat === 'Модный стол|Как в соцсетях|true', 'категория «Модный стол», подзаголовок «Как в соцсетях»');
+    ok(!d.badAlso.length && d.drinks === 'cocoa-bombs,lemonade,mulled', 'модные блюда — ещё и в своём базовом разделе, напитки — только в «Модном столе» ' + JSON.stringify(d.also));
     ok(d.unique, 'id рецептов не повторяются');
     ok(d.bad.length === 0, 'шаги 4–8, совет, картинка, единицы и отделы на месте' + (d.bad.length ? ' ' + JSON.stringify(d.bad) : ''));
-    ok(d.ids.every(id => PHOTO_IDS.indexOf(id) >= 0), 'у каждого рецепта есть фото в списке PHOTO_IDS');
+    ok(d.withPhoto.length === 20 && d.withPhoto.every(id => PHOTO_IDS.indexOf(id) >= 0) && d.trPhoto, 'у каждого рецепта с фото оно в списке PHOTO_IDS; у модных пока photo: false');
     await page.close();
   }
 
@@ -245,6 +259,25 @@ async function main() {
     ok(ing.vanilla === 'щепотка', 'рецепт: меньше 5 г → щепотка (' + ing.vanilla + ')');
     ok(ing.bay === '2 шт', 'рецепт: лавровый лист до целых (' + ing.bay + ')');
     ok(ing.tsp === '2½ ст. л.', 'рецепт: 8 ч. л. → ст. л. (' + ing.tsp + ')');
+    // «Модный стол» в списке покупок: одинаковые продукты складываются, напитки — в мл и л.
+    console.log('  — с блюдами «Модного стола»');
+    const tl = await shopping(['olivier', 'snow-globe', 'accordion', 'mulled', 'lemonade', 'tiramisu', 'mandarin-tiramisu', 'buche'], 12);
+    const tg = n => (tl.items.find(x => x.name === n) || {}).amount;
+    const names = tl.items.map(x => x.name);
+    ok(new Set(names).size === names.length && tl.items.every(x => x.dept !== 'other'), 'модные: продукты не повторяются, у всех есть отдел');
+    // мандарины: тирамису 6·12/6 = 12 + лимонад 8·12/6 = 16 → 28
+    ok(tg('Мандарины') === '28 шт', '12 гостей: мандарины 28 шт (' + tg('Мандарины') + ')');
+    // куриное филе: шар 400·12/8 = 600 + гармошка 800·12/4 = 2400 → 3 кг
+    ok(tg('Куриное филе') === '3 кг', '12 гостей: куриное филе 3 кг (' + tg('Куриное филе') + ')');
+    // сок вишнёвый: 1 л · 12/6 = 2 л
+    ok(tg('Сок вишнёвый') === '2 л' && (tl.items.find(x => x.name === 'Сок вишнёвый') || {}).dept === 'drinks', '12 гостей: сок вишнёвый 2 л, отдел «Напитки» (' + tg('Сок вишнёвый') + ')');
+    // сливки: тирамису 200·12/8 = 300 + мандариновое 200·12/6 = 400 + полено (2 полена) 450·2 = 900 → 1,6 л
+    ok(tg('Сливки 33%') === '1,6 л', '12 гостей: сливки 1,6 л (' + tg('Сливки 33%') + ')');
+    ok(tl.home.indexOf('Лёд') >= 0 && names.indexOf('Вода') < 0, 'лёд — в «Проверьте дома», воды в списке нет');
+    const bw = await page.evaluate(() => window.NYR.menuFactor(window.NYR_DATA.RECIPES.find(r => r.id === 'buche'), 12));
+    ok(bw === 2, 'полено — целое блюдо: на 12 гостей 2 полена (' + bw + ')');
+    const drinkIng = await page.evaluate(() => { const r = window.NYR_DATA.RECIPES.find(x => x.id === 'mulled'); return window.NYR.fmtIng(r.ingredients[0], 1 / 6); });
+    ok(drinkIng === '170 мл', 'глинтвейн на 1 кружку: сок 170 мл (' + drinkIng + ')');
     await page.close();
   }
 
@@ -270,13 +303,36 @@ async function main() {
       const inView = await page.evaluate(() => document.querySelector('.home-actions .big-btn:last-child').getBoundingClientRect().bottom <= innerHeight);
       ok(inView, 'обе кнопки видны на первом экране');
     }
+    // Плашка «Модный стол»: на всю ширину, «Новинка», картинка, «20 рецептов», сразу под кнопками, над плитками.
+    const fb = await page.evaluate(() => {
+      const b = document.querySelector('[data-testid="feature-trendy"]');
+      if (!b) return null;
+      const r = b.getBoundingClientRect(), tiles = document.querySelector('.tiles').getBoundingClientRect(), act = document.querySelector('.home-actions').getBoundingClientRect();
+      return { text: b.textContent, href: b.getAttribute('href'), art: !!b.querySelector('.feature-art svg, .feature-art img'),
+        full: Math.abs(r.width - act.width) < 2, below: r.top >= act.bottom, above: r.bottom <= tiles.top, bottom: r.bottom, h: innerHeight,
+        newVis: getComputedStyle(b.querySelector('.feature-new')).backgroundColor };
+    });
+    ok(fb && /Новинка/.test(fb.text) && /Модный стол/.test(fb.text) && /20\u00a0рецептов/.test(fb.text) && fb.art && fb.href === '#c/trendy', 'плашка «Модный стол»: «Новинка», картинка, «20 рецептов», ведёт в раздел');
+    ok(fb && fb.full && fb.below && fb.above, 'плашка на всю ширину, под кнопками меню и списка, над плитками');
+    if (vp.name === 'phone-portrait') ok(fb && fb.bottom <= fb.h, 'плашка целиком на первом экране (низ ' + (fb && Math.round(fb.bottom)) + ' из ' + (fb && fb.h) + ')');
+    const tileSubs = await page.evaluate(() => [...document.querySelectorAll('.tile')].map(t => t.getAttribute('href') + ' ' + t.querySelector('.tile-sub').textContent).join('; '));
+    ok(tileSubs === '#c/salads 10 рецептов; #c/hot 8 рецептов; #c/snacks 9 рецептов; #c/sweets 10 рецептов', 'на плитках счёт с модными блюдами (' + tileSubs + ')');
 
+    const CAT_N = { salads: 10, hot: 8, snacks: 9, sweets: 10 };
     for (const cat of ['salads', 'hot', 'snacks', 'sweets']) {
       await page.goto(base + '#c/' + cat);
-      ok(await page.locator('.rcard').count() === 5, 'раздел ' + cat + ': 5 рецептов');
+      const c = await page.evaluate(() => [...document.querySelectorAll('.rcard')].map(a => !!a.querySelector('.tag-trendy')));
+      const firstTr = c.indexOf(true);
+      ok(c.length === CAT_N[cat] && firstTr === 5 && c.slice(5).every(Boolean), 'раздел ' + cat + ': ' + c.length + ' рецептов, 5 классических, потом модные с меткой «Модное»');
       await layoutCheck(page, 'раздел ' + cat);
       if (cat === 'salads') await shot('cat-salads');
     }
+    await page.goto(base + '#c/trendy');
+    const tp = await page.evaluate(() => ({ n: document.querySelectorAll('.rcard').length, h: [...document.querySelectorAll('h2.sec-title')].map(h => h.textContent).join(','),
+      tags: document.querySelectorAll('.tag-trendy').length, title: document.querySelector('.page-title').textContent, sub: (document.querySelector('.cat-sub') || {}).textContent }));
+    ok(tp.n === 20 && tp.title === 'Модный стол' && tp.sub === 'Как в соцсетях' && tp.h === 'Салаты,Закуски,Горячее,Сладкое,Напитки' && tp.tags === 0, '«Модный стол»: 20 рецептов под подзаголовками (' + tp.h + ')');
+    await layoutCheck(page, 'раздел trendy');
+    await shot('cat-trendy');
     const ids = await page.evaluate(() => window.NYR_DATA.RECIPES.map(r => r.id));
     let allOpen = true;
     for (const id of ids) {
@@ -286,7 +342,7 @@ async function main() {
       if (title !== expect) { allOpen = false; ok(false, 'рецепт ' + id + ' открывается по ссылке'); }
       await layoutCheck(page, 'рецепт ' + id);
     }
-    ok(allOpen, 'все 20 рецептов открываются по прямой ссылке #r/…');
+    ok(allOpen, 'все ' + ids.length + ' рецептов открываются по прямой ссылке #r/…');
     if (vp.name === 'phone-landscape') {
       await page.goto(base + '#r/duck');
       const r = await page.evaluate(() => ({ t: document.querySelector('.page-title').getBoundingClientRect(), f: document.querySelector('.facts').getBoundingClientRect(), h: innerHeight }));
@@ -330,7 +386,7 @@ async function main() {
     await page.click('#hdr-back');
     await page.waitForTimeout(100);
     ok((await page.evaluate(() => location.hash)) === '#c/salads', 'кнопка «Назад» в шапке → раздел');
-    ok(await page.locator('.tag').count() === 1, 'в разделе отмечено «В моём меню»');
+    ok(await page.locator('.tag:not(.tag-trendy)').count() === 1, 'в разделе отмечено «В моём меню»');
     await page.goForward();
     await page.goBack();
     ok((await page.evaluate(() => location.hash)) === '#c/salads', 'системная «назад» работает');
@@ -405,6 +461,38 @@ async function main() {
     const mt = await page.evaluate(() => window.__lastShare);
     ok(/^🎄 Наше меню на Новый год \(на 8 гостей\):/.test(mt) && /Салаты: Оливье, Селёдка под шубой/.test(mt) && (mt.match(/https:/g) || []).length === 1, 'текст меню: по разделам в строку, одна ссылка в конце');
 
+    // Модное блюдо: добавили из базового раздела — в меню один раз, своим разделом «Модный стол».
+    await page.goto(base + '#c/salads');
+    await page.click('a.rcard[href="#r/snow-globe"]');
+    await page.click('[data-act="menu-add"]');
+    await page.waitForTimeout(650);
+    await page.goto(base + '#c/trendy');
+    ok(await page.locator('a.rcard[href="#r/snow-globe"] .tag').count() === 1, 'в «Модном столе» тоже отмечено «В моём меню»');
+    await page.click('a.rcard[href="#r/mulled"]');
+    ok(/Кружек:/.test(await page.locator('.stepper-label').textContent()) && /6 кружек/.test(await page.locator('.facts').textContent()), 'напиток: «Кружек:» и выход «6 кружек»');
+    await page.click('[data-act="menu-add"]');
+    await page.click('[data-act="share-recipe"]');
+    ok(/Кружек: 6/.test(await page.evaluate(() => window.__lastShare)), 'текст рецепта напитка: «Кружек: 6»');
+    await page.goto(base + '#menu');
+    const mm = await page.evaluate(() => ({ h: [...document.querySelectorAll('h2.sec-title')].map(h => h.textContent), sg: document.querySelectorAll('a.mitem-link[href^="#r/snow-globe"]').length,
+      meta: (document.querySelector('a.mitem-link[href^="#r/mulled"] .mitem-meta') || {}).textContent }));
+    ok(mm.sg === 1 && mm.h[mm.h.length - 1] === 'Модный стол' && mm.h.indexOf('Модный стол') === mm.h.length - 1, 'меню: модное блюдо один раз, в разделе «Модный стол» (' + mm.h.join(',') + ')');
+    ok(mm.meta === 'на 8 кружек', 'меню: глинтвейн «на 8 кружек» (' + mm.meta + ')');
+    await layoutCheck(page, 'меню с модными');
+    await page.click('[data-act="share-menu"]');
+    const mt2 = await page.evaluate(() => window.__lastShare);
+    ok(/\nМодный стол: Салат «Снежный шар», Безалкогольный глинтвейн\n/.test(mt2) && (mt2.match(/Снежный шар/g) || []).length === 1, 'текст меню: «Модный стол: …», без дублей');
+    await page.goto(base + '#shop');
+    const sh = await page.evaluate(() => [...document.querySelectorAll('.shop input')].map(i => i.getAttribute('data-name')));
+    ok(sh.indexOf('Шампиньоны') >= 0 && sh.indexOf('Сок вишнёвый') >= 0 && new Set(sh).size === sh.length, 'список покупок: продукты модных блюд, без дублей');
+    await page.click('[data-act="share-shop"]');
+    const st2 = await page.evaluate(() => window.__lastShare);
+    ok(/\nНапитки:\n• Сок вишнёвый — 1,35 л/.test(st2), 'текст списка: отдел «Напитки», сок 1,35 л (1 л · 8/6, вверх до 50 мл)');
+    await page.goto(base + '#menu');
+    await page.click('[data-act="menu-remove"][data-id="snow-globe"]');
+    await page.click('[data-act="menu-remove"][data-id="mulled"]');
+    await page.waitForTimeout(100);
+
     ok(errors.length === 0, 'ошибок в консоли нет' + (errors.length ? ' ' + JSON.stringify(errors.slice(0, 3)) : ''));
     await ctx.close();
   }
@@ -468,14 +556,25 @@ async function main() {
     const seen = new Set(home.map(i => i.src));
     const ids = await page.evaluate(() => window.NYR_DATA.RECIPES.map(r => ({ id: r.id, title: r.title })));
     let cats = 0;
+    const requested = [];
+    page.on('request', r => { if (/img\/photo\//.test(r.url())) requested.push(r.url()); });
     for (const c of ['salads', 'hot', 'snacks', 'sweets']) {
       await page.goto(base + '#c/' + c);
       const l = await loadedAll(); l.forEach(i => seen.add(i.src));
-      if (l.length === 5 && l.every(i => i.ok && /thumb/.test(i.src))) cats++;
+      const art = await page.locator('.rcard-art svg').count();
+      if (l.length === 5 && l.every(i => i.ok && /thumb/.test(i.src)) && art === await page.locator('.tag-trendy').count()) cats++;
     }
-    ok(cats === 4, 'разделы: у каждого блюда маленькое фото (thumb)');
+    ok(cats === 4, 'разделы: у классических блюд маленькое фото (thumb), у модных — рисунок');
+    await page.goto(base + '#c/trendy');
+    ok(await page.locator('.rcard-art svg').count() === 20 && await page.locator('#app img').count() === 0, '«Модный стол»: 20 рисунков, ни одного фото');
     const noPhoto = [];
-    for (const r of ids) {
+    const trIds = await page.evaluate(() => window.NYR_DATA.RECIPES.filter(r => r.photo === false).map(r => r.id));
+    for (const id of trIds) {
+      await page.goto(base + '#r/' + id);
+      if (await page.locator('.r-hero svg').count() !== 1 || await page.locator('#app img').count() !== 0) noPhoto.push(id);
+    }
+    ok(noPhoto.length === 0, 'модные рецепты: на странице рисунок, пустых рамок и фото нет' + (noPhoto.length ? ' ' + noPhoto.join() : ''));
+    for (const r of ids.filter(x => trIds.indexOf(x.id) < 0)) {
       await page.goto(base + '#r/' + r.id);
       const l = await loadedAll(); l.forEach(i => seen.add(i.src));
       const big = l.find(i => i.src === 'img/photo/full/' + r.id + '.webp');
@@ -486,6 +585,12 @@ async function main() {
     await page.click('[data-act="ready-menu"]');
     const menu = await loadedAll(); menu.forEach(i => seen.add(i.src));
     ok(menu.length === 5 && menu.every(i => i.ok && /thumb/.test(i.src)), 'меню: маленькие фото блюд');
+    await page.evaluate(ids => { const s = JSON.parse(localStorage.getItem('nyr.v1')); s.menu = s.menu.concat(ids); localStorage.setItem('nyr.v1', JSON.stringify(s)); }, trIds);
+    await page.goto(base + '#shop'); await page.goto(base + '#menu'); await page.reload();
+    await loadedAll();
+    ok(await page.locator('.mitem-art svg').count() === 20 && await page.locator('.mitem-art img').count() === 5, 'меню с модными: 5 фото и 20 рисунков');
+    const trReq = requested.filter(u => trIds.some(id => u.indexOf('/' + id + '.webp') >= 0 || u.indexOf('/' + id + '-') >= 0 || u.indexOf('cat-trendy') >= 0));
+    ok(trReq.length === 0, 'нет запросов к несуществующим фото модных блюд и плашки' + (trReq.length ? ' ' + trReq.slice(0, 3).join() : ''));
     await page.screenshot({ path: path.join(OUT, 'photos-menu.png') });
     // Все 25 фото (full + thumb) лежат на месте и открываются.
     const all = await page.evaluate(async names => {
@@ -514,7 +619,7 @@ async function main() {
       return page.evaluate(([sel, n]) => document.querySelectorAll(sel).length === n && !document.querySelector('#app img.photo'), [sel, n]);
     };
     ok(await check('', '.hero-art svg, .tile-art svg', 5), 'без фото: на главной рисунки стола и разделов');
-    ok(await check('#c/salads', '.rcard-art svg', 5), 'без фото: в разделе рисунки блюд');
+    ok(await check('#c/salads', '.rcard-art svg', 10), 'без фото: в разделе рисунки блюд');
     ok(await check('#r/olivier', '.r-hero svg', 1), 'без фото: в рецепте рисунок блюда');
     await page.goto(base + '#menu'); await page.click('[data-act="ready-menu"]');
     ok(await check('#menu', '.mitem-art svg', 5), 'без фото: в меню рисунки блюд');
@@ -611,6 +716,7 @@ async function main() {
         return imgs.map(i => ({ src: i.getAttribute('src'), ok: i.naturalWidth === 480 && i.naturalHeight === 360, alt: i.alt }));
       });
       total += sp.length;
+      if (!nums.length) { if (sp.length) bad.push(r.id + ': фото шагов без данных'); continue; }
       const good = sp.length === nums.length && sp.every((x, k) => x.ok && x.src === 'img/photo/steps/thumb/' + r.id + '-' + nums[k] + '.webp' && x.alt.startsWith('Шаг ' + nums[k] + ': '));
       if (!good) { bad.push(r.id + ' ' + sp.length + '/' + nums.length); continue; }
       // Крупно открывается последнее фото рецепта — из full, той же картинки.
@@ -641,7 +747,9 @@ async function main() {
     await page.reload();
     await layoutCheck(page, '320 главная');
     await page.screenshot({ path: path.join(OUT, 'w320-home.png') });
-    for (const h of ['#c/salads', '#c/hot', '#c/snacks', '#c/sweets', '#r/napoleon', '#r/chicken', '#r/holodets', '#r/eggs', '#r/sharlotka', '#menu', '#shop']) {
+    const fb320 = await page.evaluate(() => { const r = document.querySelector('[data-testid="feature-trendy"]').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, h: innerHeight }; });
+    ok(fb320.top < fb320.h * 1.6, '320: плашка «Модный стол» сразу при прокрутке (верх ' + Math.round(fb320.top) + ' при высоте экрана ' + fb320.h + ')');
+    for (const h of ['#c/salads', '#c/hot', '#c/snacks', '#c/sweets', '#c/trendy', '#r/napoleon', '#r/chicken', '#r/holodets', '#r/eggs', '#r/sharlotka', '#r/buche', '#r/mulled', '#r/olivier-rolls', '#r/ginger-house', '#menu', '#shop']) {
       await page.goto(base + h);
       await layoutCheck(page, '320 ' + h);
     }
@@ -733,7 +841,7 @@ async function main() {
     await page.goto('file://' + path.join(ROOT, 'index.html') + '#r/duck');
     ok((await page.locator('.page-title').textContent()) === 'Утка с яблоками', 'файл открывается, ссылка #r/duck работает');
     await page.click('#hdr-back');
-    ok((await page.locator('.rcard').count()) === 5, '«Назад» из рецепта по прямой ссылке → раздел');
+    ok((await page.locator('.rcard').count()) === 8, '«Назад» из рецепта по прямой ссылке → раздел');
     ok(errors.length === 0, 'без ошибок' + (errors.length ? ' ' + JSON.stringify(errors) : ''));
     await page.close();
   }
