@@ -22,7 +22,7 @@ window.APP_CONFIG = {
   // Если ссылки нет — показывается почта. Пока всё пусто — на экране заглушка «скоро появится».
   //   vk: "https://vk.com/club123", ok: "https://ok.ru/group/123", email: "help@example.ru"
   SUPPORT: {
-    vk: "",
+    vk: "https://vk.com/club243202759",  // сообщество студии «Уютные игры» (docs/PUBLISH.md студии)
     ok: "",
     email: ""
   },
