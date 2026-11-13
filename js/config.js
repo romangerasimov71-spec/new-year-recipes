@@ -23,7 +23,7 @@ window.APP_CONFIG = {
   //   vk: "https://vk.com/club123", ok: "https://ok.ru/group/123", email: "help@example.ru"
   SUPPORT: {
     vk: "https://vk.com/club243202759",  // сообщество студии «Уютные игры» (docs/PUBLISH.md студии)
-    ok: "",
+    ok: "https://ok.ru/group/70000061487179",  // группа студии «Уютные игры» в ОК (без слова «ВКонтакте»)
     email: ""
   },
 
