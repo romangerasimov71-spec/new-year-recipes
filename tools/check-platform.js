@@ -630,8 +630,8 @@ async function main() {
     await f.click('.app-foot a'); await f.waitForSelector('[data-testid="support"]');
     const t = await f.locator('#app').innerText();
     ok(/0\+/.test(t) && /Звука в приложении нет/.test(t), 'метка 0+, «Звука в приложении нет»');
-    ok(/Пишите нам: адрес поддержки скоро появится/.test(t), 'поддержка: пока заглушка (адрес заполнит Роман в config.js)');
-    await f.evaluate(() => { APP_CONFIG.SUPPORT.email = 'help@example.ru'; location.hash = ''; location.hash = 'about'; }); await page.waitForTimeout(100);
+    ok((await f.locator('.support-link').getAttribute('href')) === await f.evaluate(() => APP_CONFIG.SUPPORT.vk), 'поддержка: сообщество ВК из config.js');
+    await f.evaluate(() => { APP_CONFIG.SUPPORT.vk = ''; APP_CONFIG.SUPPORT.ok = ''; APP_CONFIG.SUPPORT.email = 'help@example.ru'; location.hash = ''; location.hash = 'about'; }); await page.waitForTimeout(100);
     ok((await f.locator('.support-link').getAttribute('href')) === 'mailto:help@example.ru', 'с почтой в config.js — ссылка на почту');
     const ext = await f.evaluate(() => [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')).filter((h) => !h.startsWith('#')));
     ok(ext.length === 1, 'единственная внешняя ссылка в приложении — поддержка (' + ext.join() + ')');
