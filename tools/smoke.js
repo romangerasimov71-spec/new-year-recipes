@@ -219,7 +219,9 @@ async function main() {
   {
     const page = await browser.newPage();
     await page.goto(base);
-    const shopping = (ids, g) => page.evaluate(([ids, g]) => window.NYR.buildShopping(ids || window.NYR_DATA.READY_MENU, g), [ids, g]);
+    // Базовое меню для расчётов (как прежнее готовое меню): 2 салата, горячее, закуска, торт.
+    const BASE = ['olivier', 'shuba', 'meat-french', 'eggs', 'napoleon'];
+    const shopping = (ids, g) => page.evaluate(([ids, g]) => window.NYR.buildShopping(ids, g), [ids || BASE, g]);
     for (const g of [2, 8]) {
       const list = await shopping(null, g);
       const get = n => (list.items.find(x => x.name === n) || {}).amount;
@@ -254,7 +256,11 @@ async function main() {
     console.log('  — понятные количества (А3)');
     const amt = async (ids, g, name) => ((await shopping(ids, g)).items.find(x => x.name === name) || {}).amount;
     const oil = await amt(['vinegret', 'potato'], 6, 'Масло растительное');
-    ok(oil === '≈ 120 мл', '8 ст. л. масла → «≈ 120 мл» (' + oil + ')');
+    ok(oil === '1 бутылка', '8 ст. л. масла → «1 бутылка» (' + oil + ')');
+    const oilHint = ((await shopping(['vinegret', 'potato'], 6)).items.find(x => x.name === 'Масло растительное') || {}).hint;
+    ok(oilHint === 'нужно ≈ 120 мл — если дома нет', 'под бутылкой — сколько нужно: «' + oilHint + '»');
+    const must = (await shopping(['olivier', 'eggs', 'buzhenina'], 20)).items.find(x => x.name === 'Горчица') || {};
+    ok(/^\d+ баночк/.test(must.amount || '') && /ч\. л\.|ст\. л\./.test(must.hint || ''), 'горчица в ложках → баночка, ложки — подсказкой (' + must.amount + ' / ' + must.hint + ')');
     const garlic = await amt(['buzhenina', 'holodets', 'potato', 'chicken'], 8, 'Чеснок (зубчики)');
     ok(/^\d+ головк[аи]? \(≈ \d+ зубчик/.test(garlic || ''), 'много чеснока → головки (' + garlic + ')');
     const bay = await amt(['buzhenina', 'holodets'], 8, 'Лавровый лист');
@@ -262,9 +268,13 @@ async function main() {
     const pep = await amt(['holodets'], 40, 'Перец чёрный горошком');
     ok(pep === '1 пачка', 'перец горошком → «1 пачка» (' + pep + ')');
     const cocoa = await amt(['kartoshka', 'tiramisu'], 40, 'Какао-порошок');
-    ok(/ст\. л\. \(≈ \d+ г\)/.test(cocoa || ''), 'какао больше 10 ст. л. → «(≈ N г)» (' + cocoa + ')');
+    ok(/^\d+ пач(ка|ки|ек)$/.test(cocoa || ''), 'много какао → пачки (' + cocoa + ')');
+    const cocoaHint = ((await shopping(['kartoshka', 'tiramisu'], 40)).items.find(x => x.name === 'Какао-порошок') || {}).hint;
+    ok(/ст\. л\. \(≈ \d+ г\)/.test(cocoaHint || ''), 'какао: в подсказке «ст. л. (≈ N г)» (' + cocoaHint + ')');
     const paprika = await amt(['chicken', 'potato', 'buzhenina'], 20, 'Паприка молотая');
-    ok(/ст\. л\./.test(paprika || ''), 'ч. л. от 6 → ст. л. (' + paprika + ')');
+    ok(/пакетик/.test(paprika || ''), 'паприка в ложках → пакетик (' + paprika + ')');
+    const paprikaHint = ((await shopping(['chicken', 'potato', 'buzhenina'], 20)).items.find(x => x.name === 'Паприка молотая') || {}).hint;
+    ok(/ст\. л\./.test(paprikaHint || ''), 'ч. л. от 6 → ст. л. в подсказке (' + paprikaHint + ')');
     const eggs = await amt(null, 20, 'Яйца');
     ok(/шт \(≈ \d+ десятк/.test(eggs || ''), 'яйца от 20 → десятки (' + eggs + ')');
     // А4: рецепт
@@ -282,6 +292,22 @@ async function main() {
     ok(ing.vanilla === 'щепотка', 'рецепт: меньше 5 г → щепотка (' + ing.vanilla + ')');
     ok(ing.bay === '2 шт', 'рецепт: лавровый лист до целых (' + ing.bay + ')');
     ok(ing.tsp === '2½ ст. л.', 'рецепт: 8 ч. л. → ст. л. (' + ing.tsp + ')');
+    const cans = await page.evaluate(() => {
+      const F = window.NYR.fmtIng, R = id => window.NYR_DATA.RECIPES.find(r => r.id === id);
+      const pea = R('olivier').ingredients.find(i => /Горошек/.test(i.name));
+      return [F(pea, 16 / 6), F(pea, 12 / 6), F(pea, 1), F(pea, 0.5)];
+    });
+    ok(cans[0] === '2–3 шт' && cans[1] === '2 шт' && cans[2] === '1 шт' && cans[3] === '½ шт', 'банки в рецепте: «2–3 шт», а не «2½ шт» (' + cans.join(' / ') + ')');
+    const ready = await page.evaluate(() => {
+      const bad = [];
+      for (let g = 1; g <= 40; g++) {
+        const m = window.NYR.readyMenu(g), nm = window.NYR.norms(g), have = { salads: 0, hot: 0, snacks: 0, sweets: 0 };
+        m.forEach(id => { const r = window.NYR_DATA.RECIPES.find(x => x.id === id); have[r.cat]++; });
+        Object.keys(have).forEach(c => { if (have[c] < nm[c][0] || have[c] > nm[c][1]) bad.push(g + ':' + c); });
+      }
+      return bad;
+    });
+    ok(!ready.length, 'готовое меню на 1–40 гостей — по нормам подсказки' + (ready.length ? ' ' + ready.slice(0, 5) : ''));
     // «Модный стол» в списке покупок: одинаковые продукты складываются, напитки — в мл и л.
     console.log('  — с блюдами «Модного стола»');
     const tl = await shopping(['olivier', 'snow-globe', 'accordion', 'mulled', 'lemonade', 'tiramisu', 'mandarin-tiramisu', 'buche'], 12);
@@ -429,7 +455,8 @@ async function main() {
     await layoutCheck(page, 'пустое меню');
     await shot('menu-empty');
     await page.click('[data-act="ready-menu"]');
-    ok(await page.locator('.mitem').count() === 5, 'готовое меню: 5 блюд');
+    ok(await page.locator('.mitem').count() === 6, 'готовое меню на 6 гостей: 6 блюд');
+    ok(await page.locator('[data-testid="howmany"] li.need').count() === 0, 'готовое меню проходит свою подсказку «Сколько блюд нужно»');
     // А7: быстрые кнопки гостей
     await page.click('[data-act="guests-set"][data-v="8"]');
     ok((await page.locator('[data-testid="guests"]').textContent()) === '8', 'быстрая кнопка «8» → гостей 8');
@@ -605,12 +632,12 @@ async function main() {
     await page.goto(base + '#menu');
     await page.click('[data-act="ready-menu"]');
     const menu = await loadedAll(); menu.forEach(i => seen.add(i.src));
-    ok(menu.length === 5 && menu.every(i => i.ok && /thumb/.test(i.src)), 'меню: маленькие фото блюд');
+    ok(menu.length === 6 && menu.every(i => i.ok && /thumb/.test(i.src)), 'меню: маленькие фото блюд');
     await page.evaluate(() => window.NYR.flushSave());
     await page.evaluate(ids => { const s = JSON.parse(localStorage.getItem('nyr_menu')); s.m = s.m.concat(ids); localStorage.setItem('nyr_menu', JSON.stringify(s)); }, trIds);
     await page.goto(base + '#shop'); await page.goto(base + '#menu'); await page.reload();
     await loadedAll();
-    ok(await page.locator('.mitem-art svg').count() === 0 && await page.locator('.mitem-art img').count() === 25, 'меню с модными: 25 фото, рисунков нет');
+    ok(await page.locator('.mitem-art svg').count() === 0 && await page.locator('.mitem-art img').count() === 26, 'меню с модными: 26 фото, рисунков нет');
     const trReq = requested.filter(u => trIds.some(id => u.indexOf('/' + id + '.webp') >= 0) || u.indexOf('cat-trendy') >= 0);
     ok(trReq.length > 0, 'фото модных блюд и плашки запрашиваются (' + trReq.length + ')');
     await page.screenshot({ path: path.join(OUT, 'photos-menu.png') });
@@ -646,7 +673,7 @@ async function main() {
     ok(await check('#c/salads', '.rcard-art svg', 10), 'без фото: в разделе рисунки блюд');
     ok(await check('#r/olivier', '.r-hero svg', 1), 'без фото: в рецепте рисунок блюда');
     await page.goto(base + '#menu'); await page.click('[data-act="ready-menu"]');
-    ok(await check('#menu', '.mitem-art svg', 5), 'без фото: в меню рисунки блюд');
+    ok(await check('#menu', '.mitem-art svg', 6), 'без фото: в меню рисунки блюд');
     await layoutCheck(page, 'меню без фото');
     ok(jsErrors.length === 0, 'без фото — ошибок в коде нет' + (jsErrors.length ? ' ' + JSON.stringify(jsErrors) : ''));
     await page.close();
@@ -1056,7 +1083,7 @@ async function main() {
     const errors = watchErrors(page);
     await page.goto(base + '#menu');
     await page.click('[data-act="ready-menu"]');
-    ok(await page.locator('.mitem').count() === 5, 'приложение работает, если хранилище запрещено');
+    ok(await page.locator('.mitem').count() === 6, 'приложение работает, если хранилище запрещено');
     ok(errors.length === 0, 'без ошибок' + (errors.length ? ' ' + JSON.stringify(errors) : ''));
     await ctx.close();
   }

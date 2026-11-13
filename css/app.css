@@ -667,3 +667,17 @@ html.has-banner .toast { bottom: calc(var(--banner-h, 0px) + 16px + env(safe-are
   * { transition: none !important; }
 }
 
+.shop-hint { flex-basis: 100%; font-size: 18px; color: var(--muted); }
+/* Счётчик: «−  1  +» не разрывается — при нехватке места на новую строку уходит вся группа, а не один «+». */
+.stepper-ctl { display: inline-flex; align-items: center; gap: 12px; flex-wrap: nowrap; }
+/* План по дням: «уже не успеть», пояснение про духовку, «сейчас», «к чаю», перенесённое с 29-го. */
+.notice-info { background: var(--gold-soft); color: var(--text); border: 2px solid #E8C98A; margin: 0 0 14px; font-weight: 600; }
+.plan-late { background: var(--gold-soft); }
+.plan-late .plan-text { font-weight: 600; }
+.plan-note .plan-text { grid-column: 1 / -1; color: var(--muted); }
+.plan-now .plan-at { background: var(--red); }
+.plan-tea .plan-at { background: var(--gold-dark, #8A5A12); }
+/* Карточка меню: длинное слово названия («Фаршированные», «Безалкогольный») не рвём переносом —
+   если рядом с «Убрать» оно не помещается, кнопка уходит на строку ниже. */
+.mitem-title { hyphens: manual; -webkit-hyphens: manual; }
+.mitem-link { flex: 1 1 230px; flex-basis: min-content; }

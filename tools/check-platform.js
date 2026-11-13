@@ -56,7 +56,8 @@ function watch(page) {
 
 async function newCtx(browser, opts = {}) {
   const ctx = await browser.newContext({ viewport: opts.vp || { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: !!opts.touch, isMobile: !!opts.touch, locale: opts.locale || 'ru-RU' });
-  if (opts.today) await ctx.addInitScript((d) => { window.__NYR_TODAY = d; }, opts.today);
+  // Без даты — сезон плана (ноябрь): иначе после 1 января план за рекламу не предлагается и проверки рекламы не пройдут.
+  await ctx.addInitScript((d) => { window.__NYR_TODAY = d; }, opts.today || '2026-11-20');
   await ctx.addInitScript(() => { try { delete Navigator.prototype.share; delete Navigator.prototype.canShare; } catch (e) {} });
   // Внешнее не нужно приложению: всё, что не с нашего адреса, — обрываем (и запоминаем).
   await ctx.route(/^https?:\/\/(?!127\.0\.0\.1)/, (r) => r.abort());
@@ -216,10 +217,18 @@ async function main() {
     await readyMenu(f);
     await f.evaluate(() => NYR.flushSave()); await page.waitForTimeout(150);
     const store = await page.evaluate(() => window.STORE);
-    ok(store.nyr_menu && JSON.parse(store.nyr_menu).m.length === 5, 'меню сохранено в хранилище ВК (VKWebAppStorageSet nyr_menu)');
+    ok(store.nyr_menu && JSON.parse(store.nyr_menu).m.length === 6, 'меню сохранено в хранилище ВК (VKWebAppStorageSet nyr_menu)');
     ok(Object.values(store).every((v) => v.length <= 4096), 'каждое значение в хранилище ВК не больше 4 КБ');
     const f2 = await reloadFrame(page, f);
-    ok(await f2.evaluate(() => NYR.state.menu.length) === 5, 'перезапуск во ВК — меню на месте (из хранилища ВК)');
+    ok(await f2.evaluate(() => NYR.state.menu.length) === 6, 'перезапуск во ВК — меню на месте (из хранилища ВК)');
+    // Свернули приложение (VKWebAppViewHide) — сохранение сразу, без отложки в 300 мс.
+    await f2.evaluate(() => { location.hash = 'menu'; }); await f2.waitForSelector('[data-act="guests+"]');
+    await f2.click('[data-act="guests+"]');
+    await page.evaluate(() => { document.getElementById('app').contentWindow.postMessage({ type: 'VKWebAppViewHide', data: {} }, '*'); });
+    await page.waitForTimeout(80);
+    const g7 = await page.evaluate(() => window.STORE.nyr_menu && JSON.parse(window.STORE.nyr_menu).g);
+    ok(g7 === 7, 'VKWebAppViewHide (свернули) — сохранено сразу (гостей ' + g7 + ')');
+    await f2.click('[data-act="guests-"]'); await f2.evaluate(() => NYR.flushSave());
     // План за рекламу (VKWebAppShowNativeAds reward)
     await f2.evaluate(() => { location.hash = 'menu'; }); await f2.waitForSelector('#planAdBtn');
     await f2.click('#planAdBtn');
@@ -345,7 +354,11 @@ async function main() {
     await bannerClear(f, 'меню');
     const hm = (await f.locator('[data-testid="howmany"]').innerText()).replace(/\s+/g, ' ');
     ok(/На 6 гостей обычно хватает 2–3 салатов, 1 горячего, 2 закусок и 1 десерта/.test(hm), 'подсказка: «На 6 гостей обычно хватает 2–3 салатов, 1 горячего, 2 закусок и 1 десерта»');
-    ok(/Закуски: есть 1 — можно добавить 1 закуску/.test(hm) && /Салаты: есть 2/.test(hm), 'что есть и чего не хватает: «Закуски: есть 1 — можно добавить 1 закуску»');
+    ok(/Закуски: есть 2/.test(hm) && /Салаты: есть 2/.test(hm) && !/можно добавить/.test(hm) && /Блюд хватает/.test(hm), 'готовое меню проходит свою подсказку: «Закуски: есть 2», «Блюд хватает на всех гостей»');
+    await f.click('[data-act="guests-set"][data-v="10"]');
+    const hm10 = (await f.locator('[data-testid="howmany"]').innerText()).replace(/\s+/g, ' ');
+    ok(/можно добавить/.test(hm10), '10 гостей — подсказка предлагает добавить блюда');
+    await f.click('[data-act="guests-set"][data-v="6"]');
     ok(/Посмотрите рекламу — и получите план: что готовить 29, 30 и 31 декабря/.test(await f.locator('[data-testid="plan-card"]').textContent()), 'кнопка плана с пояснением про рекламу');
     // отмена — без награды, сообщение, кнопка доступна
     await page.goto(base + '?fakead=cancel#menu'); await f.waitForFunction(isReady);
@@ -414,6 +427,103 @@ async function main() {
     await page.goto(base + '#plan'); await page.reload(); await f.waitForFunction(isReady);
     ok(await f.locator('#planAdBtn').count() === 1 && /Посмотрите рекламу/.test(await f.locator('.plan-card').textContent()), 'по ссылке #plan — предложение с кнопкой');
     await ctx.close();
+  }
+
+  console.log('\nПлан знает дату и что духовка одна:');
+  {
+    const planAt = async (today, menu, t) => {
+      const { ctx, page, f, w } = await openWeb(browser, base, '', { today, query: '?nobanner' });
+      await f.evaluate(([menu, t]) => { NYR.state.menu = menu; NYR.meta.plan = { day: 1, menu: menu.slice().sort().join(','), t: t || 21 }; NYR.flushSave(); location.hash = 'plan'; }, [menu, t]);
+      await page.waitForTimeout(150);
+      const P = await f.evaluate(() => { const d = NYR.planDays(); return { show: d.show, d29: d[29].map((x) => x.r.id), d30: d[30].map((x) => x.r.id), d31: d[31].map((x) => ({ id: x.r.id, at: x.at, now: x.now, text: x.text })), late: d.late.map((x) => x.r.id), tea: d.tea.map((x) => x.r.id), oven: d.oven, notes: d.notes, shop: d.shop, moved: d.moved, T: d.T }; });
+      const html = (await f.locator('#app').innerText()).replace(/\s+/g, ' ');
+      return { ctx, page, f, w, P, html };
+    };
+    // Духовка одна: пересекаются только блюда с одной температурой, и не больше двух сразу.
+    const ovenOk = (oven) => {
+      const bad = [];
+      oven.forEach((a, i) => oven.forEach((b, k) => { if (k > i && a.from < b.to && b.from < a.to && (a.t !== b.t || a.t2 !== b.t2)) bad.push(a.id + '+' + b.id); }));
+      oven.forEach((a) => { const n = oven.filter((b) => b.from <= a.from && a.from < b.to).length; if (n > 2) bad.push('3+ в ' + a.from); });
+      return bad;
+    };
+    const M = ['olivier', 'holodets', 'napoleon'];
+    let r = await planAt('2026-12-28', M);
+    ok(r.P.show.join() === '29,30,31' && r.P.d29.includes('holodets') && r.P.d29.includes('napoleon') && r.P.d30.includes('olivier'), '28 декабря: все три дня, холодец и «Наполеон» — 29-го');
+    ok(/лучше взять 30-го/.test(r.html) && /Докупите свежее/.test(r.html), '28 декабря: свежее (зелёный лук) — купить 30-го, на 30-е — напоминание');
+    ok(r.P.tea.includes('napoleon') && !r.P.d31.some((x) => x.id === 'napoleon') && /К чаю/.test(r.html), '«Наполеон» — «к чаю», после застолья, без времени «за 20 минут до стола»');
+    await layout(r.f, 'план 28 декабря 390');
+    await r.ctx.close();
+    r = await planAt('2026-12-28', ['holodets', 'napoleon']);
+    ok(!/лучше взять 30-го/.test(r.html) && !/Докупите свежее/.test(r.html), 'в меню нет зелени и икры — про «свежее 30-го» ни слова');
+    await r.ctx.close();
+    r = await planAt('2026-12-30', M);
+    ok(r.P.show.join() === '30,31' && !/29 декабря,/.test(r.html), '30 декабря: 29-е не показано');
+    ok(r.P.moved && r.P.d30.includes('holodets') && r.P.d30.includes('napoleon') && /29 декабря уже прошло/.test(r.html), '30 декабря: холодец и «Наполеон» перенесены на сегодня, об этом сказано');
+    ok(/30 декабря, [а-я]+ — сегодня/.test(r.html), 'заголовок «30 декабря — сегодня»');
+    await r.ctx.close();
+    r = await planAt('2026-12-30', ['buzhenina']);
+    ok(r.P.d30.length === 1 && /хотя бы на 6 часов/.test(await r.f.locator('.plan-day[data-day="30"]').innerText()), '30 декабря: буженина — замариновать и запечь в один день (одной строкой)');
+    await r.ctx.close();
+    r = await planAt('2026-12-31', M); // 31-е, полдень
+    ok(r.P.show.join() === '31' && /Сегодня праздник/.test(r.html), '31 декабря днём: только сегодняшний день');
+    ok(r.P.late.includes('holodets') && r.P.late.includes('napoleon') && /Уже не успеть/.test(r.html) && /замените блюдо/.test(r.html), '31 декабря днём: холодец и «Наполеон» — «уже не успеть, замените блюдо»');
+    ok(!r.P.d31.some((x) => x.id === 'holodets'), 'холодца нет в делах на сегодня');
+    ok(r.P.d31.some((x) => x.id === 'olivier' && x.now && /Сварите/.test(x.text)) && r.P.d31.some((x) => x.id === 'olivier' && /Нарежьте/.test(x.text)), 'оливье: сварить овощи — сейчас, нарезать — вечером');
+    ok(r.P.d31.every((x) => x.now || x.at >= 12 * 60), 'дел раньше 12:00 нет (кроме «сейчас»)');
+    await layout(r.f, 'план 31 декабря днём 390');
+    await r.ctx.close();
+    r = await planAt('2026-12-31T08:00', M);
+    ok(!r.P.late.length && r.P.d31.some((x) => x.id === 'holodets'), '31 декабря в 8 утра: холодец ещё успеть (сварить сейчас — застынет к вечеру)');
+    await r.ctx.close();
+    r = await planAt('2026-12-31T21:30', M);
+    ok(/Пора за стол/.test(r.html), '31 декабря после 21:00: «Пора за стол — с праздником!»');
+    await r.f.evaluate(() => { NYR.meta.plan = null; location.hash = 'menu'; }); await r.page.waitForTimeout(150);
+    ok(await r.f.locator('#planAdBtn').count() === 0 && /Застолье совсем скоро/.test(await r.f.locator('[data-testid="plan-card"]').innerText()), '31 декабря вечером план за рекламу не предлагаем');
+    await r.ctx.close();
+    {
+      const { ctx, page, f } = await openWeb(browser, base, '', { today: '2027-01-02' });
+      await readyMenu(f);
+      ok(await f.locator('#planAdBtn').count() === 0 && /следующему Новому году/.test(await f.locator('[data-testid="plan-card"]').innerText()), '2 января: рекламы за план нет — «пригодится к следующему Новому году»');
+      await f.evaluate(() => { NYR.meta.plan = { day: 1, menu: NYR.state.menu.slice().sort().join(','), t: 21 }; location.hash = 'plan'; }); await page.waitForTimeout(150);
+      ok(await f.locator('[data-testid="plan-closed"]').count() === 1 && await f.locator('#planAdBtn').count() === 0, '2 января: по ссылке #plan — без рекламы и без плана');
+      await ctx.close();
+    }
+    // Одна духовка: утка, шарлотка, курица, картошка, мясо по-французски, мини-веллингтоны.
+    const L = ['duck', 'sharlotka', 'chicken', 'potato', 'meat-french', 'wellington'];
+    for (const [d, t] of [['2026-12-28', 19], ['2026-12-28', 21], ['2026-12-31T08:00', 21]]) {
+      r = await planAt(d, L, t);
+      const bad = ovenOk(r.P.oven);
+      ok(!bad.length && r.P.oven.length === 6, d + ', за стол в ' + t + ':00: в духовке не встречаются блюда с разной температурой и не больше двух сразу' + (bad.length ? ' ' + bad.join() : ''));
+      const sh = r.P.oven.find((o) => o.id === 'sharlotka'), firstHot = Math.min(...r.P.oven.filter((o) => o.id !== 'sharlotka').map((o) => o.from));
+      ok(sh && sh.to <= firstHot && sh.from <= 11 * 60, 'шарлотка — с утра, до горячего (' + Math.floor(sh.from / 60) + ':' + String(sh.from % 60).padStart(2, '0') + ')');
+      ok(r.P.oven.every((o) => o.to <= r.P.T), 'всё из духовки — к застолью');
+      ok(r.P.notes.some((n) => /Духовка одна/.test(n)), 'есть честная строка «Духовка одна…»');
+      const wf = r.P.d31.find((x) => x.id === 'wellington' && /запекайте/.test(x.text)), wt = r.P.d31.find((x) => x.id === 'wellington' && /Достаньте слоёное тесто/.test(x.text));
+      ok(wf && wt && wt.at <= wf.at - 30 && !/заранее/.test(wf.text), 'мини-веллингтоны: «Достаньте тесто» — отдельной строкой, за 30–40 минут до заворачивания');
+      if (t === 19 && d === '2026-12-28') await layout(r.f, 'план «одна духовка» 390');
+      await r.ctx.close();
+    }
+    r = await planAt('2026-12-28', ['chicken', 'potato', 'accordion', 'potato-tree']);
+    ok(!ovenOk(r.P.oven).length, 'четыре горячих при 200 °C — по два, не больше');
+    await r.ctx.close();
+    r = await planAt('2026-12-31T13:00', L);
+    ok(!ovenOk(r.P.oven).length && r.P.oven.every((o) => o.from >= 13 * 60), '31-го в 13:00: духовка — только с «сейчас», без наложений');
+    await r.ctx.close();
+    // Меню изменили на другой день — план закрылся, и об этом сказано.
+    {
+      const { ctx, page, f } = await openWeb(browser, base, '', { today: '2026-12-28', query: '?nobanner' });
+      await readyMenu(f);
+      await f.evaluate(() => { NYR.meta.plan = { day: 1, menu: NYR.state.menu.slice().sort().join(','), t: 21 }; NYR.flushSave(); location.hash = 'shop'; });
+      await page.waitForTimeout(100);
+      await f.evaluate(() => { location.hash = 'menu'; }); await f.waitForSelector('[data-act="menu-remove"]');
+      await f.click('[data-act="menu-remove"][data-id="olivier"]');
+      const tt = await f.locator('#toast').innerText();
+      ok(/План по дням был для прежнего меню/.test(tt), 'убрал блюдо на другой день — сразу сказано: «План по дням был для прежнего меню…»');
+      ok(await f.locator('[data-testid="plan-old"]').count() === 1, 'у кнопки плана — пояснение: план был для прежнего меню, вернёте блюда — откроется');
+      await f.click('#toast [data-toast-undo]');
+      ok(await f.evaluate(() => NYR.planOpen()), '«Вернуть» — прежний план снова открыт');
+      await ctx.close();
+    }
   }
 
   console.log('\n«Блюдо дня» и счётчик до Нового года:');
