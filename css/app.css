@@ -222,7 +222,7 @@ svg { display: block; }
 /* ---------- Рецепт ---------- */
 .r-hero { border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin: 4px 0 6px; background: var(--photo-bg); }
 .r-hero svg { width: 100%; height: auto; max-height: 340px; overflow: visible; }
-/* Листание главного фото (у рецептов с gallery): лента кадров, стрелки по краям, под фото точки и «1 из 5». */
+/* Листание главного фото: лента, стрелки, точки и «1 из 5». */
 .r-gal { margin: 4px 0 6px; min-width: 0; }
 .r-gal .r-hero {
   margin: 0; position: relative;
@@ -309,7 +309,7 @@ svg { display: block; }
 .step.done .step-num { background: var(--green); }
 .step.done .step-done { display: inline-flex; }
 
-/* Шаг с фото: одна карточка — сверху текст (нажатие = «Сделано»), снизу фото (нажатие = открыть крупно). */
+/* Шаг с фото: текст (= «Сделано»), под ним фото (= крупно). */
 .step-li.has-photo { border: 2px solid var(--line); border-radius: 14px; background: var(--bg); overflow: hidden; }
 .step-li.has-photo .step { border: 0; border-radius: 0; background: transparent; }
 .step-li.has-photo.done { background: var(--green-soft); border-color: #9CC3AA; }
@@ -363,7 +363,7 @@ html.viewer-open, html.viewer-open body { overflow: hidden; }
 .viewer-stage { order: 1; }
 .viewer-text { order: 2; padding: 0 16px; }
 .viewer-nav { order: 3; padding: 10px 16px 14px; }
-/* Альбом и компьютер: фото слева, справа счётчик, «Закрыть», текст и стрелки — текст не налезает на фото. */
+/* Альбом и компьютер: фото слева, остальное справа. */
 @media (min-aspect-ratio: 5 / 4) {
   .viewer { flex-direction: row; }
   .viewer-stage { order: 0; flex: 1 1 auto; padding: 12px; }
@@ -668,7 +668,7 @@ html.has-banner .toast { bottom: calc(var(--banner-h, 0px) + 16px + env(safe-are
 }
 
 .shop-hint { flex-basis: 100%; font-size: 18px; color: var(--muted); }
-/* Счётчик: «−  1  +» не разрывается — при нехватке места на новую строку уходит вся группа, а не один «+». */
+/* Счётчик «− 1 +» переносится целиком. */
 .stepper-ctl { display: inline-flex; align-items: center; gap: 12px; flex-wrap: nowrap; }
 /* План по дням: «уже не успеть», пояснение про духовку, «сейчас», «к чаю», перенесённое с 29-го. */
 .notice-info { background: var(--gold-soft); color: var(--text); border: 2px solid #E8C98A; margin: 0 0 14px; font-weight: 600; }
@@ -677,7 +677,10 @@ html.has-banner .toast { bottom: calc(var(--banner-h, 0px) + 16px + env(safe-are
 .plan-note .plan-text { grid-column: 1 / -1; color: var(--muted); }
 .plan-now .plan-at { background: var(--red); }
 .plan-tea .plan-at { background: var(--gold-dark, #8A5A12); }
-/* Карточка меню: длинное слово названия («Фаршированные», «Безалкогольный») не рвём переносом —
-   если рядом с «Убрать» оно не помещается, кнопка уходит на строку ниже. */
+/* Карточка меню: длинное слово не рвём — не влезает, «Убрать» уходит ниже. */
 .mitem-title { hyphens: manual; -webkit-hyphens: manual; }
 .mitem-link { flex: 1 1 230px; flex-basis: min-content; }
+/* до 374 px «Убрать» у всех под названием */
+@media (max-width: 374px) {
+  .mitem-link { flex: 1 1 100%; }
+}

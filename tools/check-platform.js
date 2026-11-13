@@ -509,6 +509,59 @@ async function main() {
     r = await planAt('2026-12-31T13:00', L);
     ok(!ovenOk(r.P.oven).length && r.P.oven.every((o) => o.from >= 13 * 60), '31-го в 13:00: духовка — только с «сейчас», без наложений');
     await r.ctx.close();
+    // Перепроверка Лёхи (13 ноя): A — занятость духовки только по блюдам, что остались в плане;
+    // B — причина «духовка занята», если по времени успеть можно; C — шарлотка «к чаю»; D — курица;
+    // E — честно про много горячих; F — подготовка не теряется; G — граница продажи от часа застолья.
+    r = await planAt('2026-12-31T19:00', ['sprats', 'sharlotka', 'duck'], 22);
+    ok(r.P.late.join() === 'duck' && r.P.oven.some((o) => o.id === 'sharlotka') && !/духовка до застолья занята/.test(r.html),
+      'A: 31-го 19:00, стол 22:00 — утку не успеть, шарлотка в плане (духовка без утки свободна)');
+    await r.ctx.close();
+    const A2 = ['olivier', 'shuba', 'duck', 'sharlotka', 'wellington', 'holodets', 'eggs', 'mulled'];
+    r = await planAt('2026-12-31T18:00', A2, 21);
+    ok(!r.P.late.includes('sharlotka') && r.P.oven.some((o) => o.id === 'sharlotka') && !/духовка до застолья занята/.test(r.html),
+      'A: 31-го 18:00, 8 блюд с уткой — шарлотка не «не успеть»');
+    await r.ctx.close();
+    const HOT9 = ['olivier', 'meat-french', 'chicken', 'duck', 'potato', 'buzhenina', 'accordion', 'potato-tree', 'wellington'];
+    r = await planAt('2026-12-31T18:00', HOT9, 21);
+    {
+      const ch = (r.html.match(/Курица в духовке целиком Уже не успеть[^.]*\./) || [''])[0];
+      ok(r.P.late.includes('chicken') && /духовка до застолья занята/.test(ch), 'B: 31-го 18:00, 9 горячих — курица: причина «духовка занята», а не «нужно 2 ч» (' + ch + ')');
+      ok(r.P.d31.some((x) => x.id === 'meat-french' && x.now && /отбейте мясо/.test(x.text)) &&
+        r.P.d31.findIndex((x) => x.id === 'meat-french' && /отбейте/.test(x.text)) < r.P.d31.findIndex((x) => x.id === 'meat-french' && /Соберите/.test(x.text)),
+        'F: мясо по-французски — «нарежьте и отбейте мясо» на «Сейчас», перед «Соберите»');
+      ok(r.P.notes.some((n) => /Горячих много/.test(n)) && !/когда духовка освободится/.test(r.html), 'E: 9 горячих — «Горячих много…», без невыполнимого «прогрейте, когда освободится»');
+    }
+    await layout(r.f, 'план 31-го 18:00, 9 горячих 390');
+    await r.ctx.close();
+    r = await planAt('2026-12-31T13:00', HOT9, 21);
+    {
+      const note = r.P.d31.find((x) => x.id === 'chicken' && /Достаньте курицу/.test(x.text)), fin = r.P.d31.find((x) => x.id === 'chicken' && /поставьте в духовку/.test(x.text));
+      ok(fin && (!note || fin.at - note.at >= 60 || !/нужен час/.test(note.text)), 'D: 31-го 13:00 — курица: «нужен час, чтобы согреться» только если до духовки есть час');
+      ok(r.P.notes.some((n) => /Горячих много/.test(n)) && !/когда духовка освободится/.test(r.html), 'E: 31-го 13:00, 9 горячих — честная строка, без «прогрейте, когда освободится»');
+    }
+    await r.ctx.close();
+    r = await planAt('2026-12-31T18:00', HOT9.concat('sharlotka'), 21);
+    ok(r.P.late.includes('sharlotka') && /Шарлотка с яблоками Уже не успеть к чаю/.test(r.html) && !/Шарлотка с яблоками Уже не успеть к 21/.test(r.html),
+      'C: шарлотку, если духовка занята до застолья, не успеть «к чаю», а не «к 21:00»');
+    await r.ctx.close();
+    // G: граница продажи — от выбранного часа застолья.
+    for (const [now, t, offered] of [['2026-12-31T21:00', 23, true], ['2026-12-31T22:20', 23, false], ['2026-12-31T18:30', 19, false], ['2026-12-31T20:00', 21, true]]) {
+      const { ctx, page, f } = await openWeb(browser, base, '', { today: now, query: '?nobanner' });
+      await readyMenu(f);
+      await f.evaluate((t) => { NYR.meta.plan = { day: 0, menu: '', t }; location.hash = 'plan'; }, t); await page.waitForTimeout(150);
+      const has = await f.locator('#planAdBtn').count() > 0;
+      ok(has === offered, 'G: ' + now.slice(11) + ', стол ' + t + ':00 — план за рекламу ' + (offered ? 'предлагаем' : 'уже не предлагаем'));
+      await ctx.close();
+    }
+    {
+      const { ctx, page, f } = await openWeb(browser, base, '', { today: '2026-12-31T20:30', query: '?nobanner' });
+      await readyMenu(f);
+      await f.evaluate(() => { NYR.meta.plan = null; location.hash = 'plan'; }); await page.waitForTimeout(150);
+      ok(await f.locator('#planAdBtn').count() === 0 && await f.locator('[data-testid="plan-closed"] [data-act="table-set"][data-v="23"]').count() === 1, 'G: 31-го 20:30, час не выбран (21:00) — плана нет, но можно выбрать час позже');
+      await f.locator('[data-act="table-set"][data-v="23"]').click(); await page.waitForTimeout(150);
+      ok(await f.locator('#planAdBtn').count() === 1, 'G: выбрал 23:00 — план за рекламу снова предлагается');
+      await ctx.close();
+    }
     // Меню изменили на другой день — план закрылся, и об этом сказано.
     {
       const { ctx, page, f } = await openWeb(browser, base, '', { today: '2026-12-28', query: '?nobanner' });

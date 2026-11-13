@@ -913,7 +913,7 @@
   /* ---------- План готовки по дням (за рекламу) ----------
      Знает сегодняшнюю дату: до 29 декабря — все три дня; 30-го — дела с 29-го переносятся на сегодня;
      31-го — только то, что ещё можно успеть (по часам), остальное — честно «уже не успеть».
-     С 1 января до 1 ноября и 31-го после 21:00 план за рекламу не предлагается.
+     С 1 января до 1 ноября и 31-го меньше чем за 45 минут до застолья (час — выбранный) план за рекламу не предлагается.
      Духовка одна: горячие по очереди, вместе (не больше двух) — только при одинаковой температуре;
      выпечка 31-го — с утра, пока духовка свободна. Время 31-го — в минутах от полуночи. */
   var TABLE_HOURS = [19, 20, 21, 22, 23], DEFAULT_TABLE = 21;
@@ -923,7 +923,8 @@
   var BAKE_FROM = 600;     // выпечка 31-го — с 10:00
   var RUSH_FROM = 540;     // срочные заготовки 31-го — с 9:00 (раньше — только если иначе не успеть)
   var LATE_GRACE = 30;     // опоздали меньше чем на полчаса — «сейчас», больше — «уже не успеть»
-  var OFFER_UNTIL_31 = 21 * 60;
+  var OFFER_BEFORE = 45;   // 31-го: меньше чем за 45 минут до застолья план за рекламу уже не предлагаем
+  var LONG_WAIT = 60;      // горячее ждёт стола под фольгой дольше часа — значит, горячих много для одной духовки
   function menuKey() { return state.menu.slice().sort().join(','); }
   // Какой сегодня день для плана: day — 29/30/31 (0 — раньше), min — минуты от полуночи (только 31-го),
   // season: 'on' — план предлагаем, 'late' — 31-е вечер, 'off' — праздник прошёл.
@@ -931,7 +932,7 @@
     var d = today(), m = d.getMonth(), day = d.getDate(), min = d.getHours() * 60 + d.getMinutes();
     if (m < 10) return { day: 0, min: -1, season: 'off' };
     var pd = m === 11 && day >= 29 ? day : 0;
-    return { day: pd, min: pd === 31 ? min : -1, season: pd === 31 && min >= OFFER_UNTIL_31 ? 'late' : 'on' };
+    return { day: pd, min: pd === 31 ? min : -1, season: pd === 31 && min >= tableHour() * 60 - OFFER_BEFORE ? 'late' : 'on' };
   }
   // План открыт для этого меню; если меню поменяли в тот же день, когда открыли, — пересчёт без новой рекламы.
   function planOpen() {
@@ -1014,8 +1015,20 @@
   // Весь план: { 29: [...], 30: [...], 31: [...] } — дела дня ({r, text, at?, now?}),
   // show — какие дни показывать, shop — строки «купить» по дням, late — «уже не успеть», tea — «к чаю»,
   // notes — пояснения к 31-му (духовка), moved — 30-го перенесли дела с 29-го, over — 31-го уже пора за стол.
-  function planDays(skip) {
-    skip = skip || [];
+  // 31-го «не успеть» убираем и считаем заново: сначала не успеть по времени, потом — по духовке.
+  function planDays() {
+    var skip = [], late = [], P;
+    for (var guard = 0; ; guard++) {
+      P = planCore(skip);
+      if (!P.late.length || guard >= 12 || skip.length >= state.menu.length) break;
+      var intr = P.late.filter(function (it) { return it.intr; }), drop = intr.length ? intr : P.late;
+      late = late.concat(drop);
+      skip = skip.concat(drop.map(function (it) { return it.r.id; }));
+    }
+    P.late = late.concat(P.late).map(function (it) { return { r: it.r, text: it.text }; });
+    return P;
+  }
+  function planCore(skip) {
     var ph = planPhase(), td = ph.day, T = tableHour() * 60;
     var now = td === 31 ? ph.min : -Infinity, nowAt = td === 31 ? ceil15(ph.min) : -Infinity;
     var P = { 29: [], 30: [], 31: [], show: PLAN_DAYS.filter(function (d) { return d >= td; }), shop: {}, late: [], tea: [], notes: [],
@@ -1037,12 +1050,16 @@
       var r = rec(id), p = r.prep;
       if (!p) return;
       var serve = p.tea ? T + TEA_AFTER : T;
-      var x = { r: r, p: p, serve: serve, finalAt: p.final ? serve - (p.before || 0) : null, items: [], bakes: [] };
+      var x = { r: r, p: p, serve: serve, finalAt: p.final ? serve - (p.before || 0) : null, items: [], bakes: [],
+        when: p.tea || p.toTea ? 'к чаю' : 'к ' + hhmm(T) };
       dish.push(x);
       if (p.oven && p.final) {
         var rushing = td === 31 && p.daysBefore >= 1 && p.note;
         var job = { x: x, t: p.oven.t, t2: p.oven.t2 || 0, min: p.oven.min, rest: p.oven.rest, w: p.oven.w,
           minIn: nowAt + p.oven.prep + (rushing ? (p.rush || { ahead: 60 }).ahead : 0) };
+        // не успеть и при пустой духовке — не хватает времени
+        x.hotIntr = T - job.rest - job.min < job.minIn - LATE_GRACE;
+        x.hotNeed = job.minIn - nowAt + job.min + job.rest;
         hot.push(job);
       }
     });
@@ -1056,6 +1073,9 @@
       P.oven.push({ id: x.r.id, t: h.j.t, t2: h.j.t2, from: h.inAt, to: h.out });
     });
     var ovenCount = hot.length;
+    // прогреть ждущее горячее можно, если в конце духовка свободна 15 минут
+    var lastOut = hotRes.reduce(function (m, h) { return Math.max(m, h.out); }, -Infinity);
+    var reheatOk = T - lastOut >= 15, longWait = false;
 
     // 2) Заготовки до 31-го — по датам; 31-го — по часам.
     dish.forEach(function (x) {
@@ -1078,9 +1098,12 @@
           else if (rush.bake) x.bakes.push({ b: rush.bake, earliest: s + rush.bake.after, latestEnd: (p.final && !p.tea ? finalAt : x.serve) - rush.bake.cool });
         }
       } else if (p.note) {
-        x.items.push({ r: r, text: p.note, at: finalAt - ((p.noteBefore || 0) - (p.before || 0)), soft: true });
+        var ahead = (p.noteBefore || 0) - (p.before || 0);
+        x.items.push({ r: r, text: p.note, at: finalAt - ahead, soft: true, opt: !!p.noteOpt, short: p.noteLate, shortIf: p.noteLateIf || ahead });
       }
-      if (p.also && finalAt != null) p.also.forEach(function (a) { x.items.push({ r: r, text: a.text, at: finalAt - a.ahead, soft: true }); });
+      if (p.also && finalAt != null) p.also.forEach(function (a) {
+        x.items.push({ r: r, text: a.text, at: finalAt - a.ahead, soft: true, short: a.late, shortIf: a.lateIf || a.ahead });
+      });
       if (p.final) {
         if (p.tea) P.tea.push({ r: r, text: p.final, x: x });
         else if (p.bake) x.flex = true; // выпечка — в свободную духовку, ниже
@@ -1091,10 +1114,12 @@
             if (h.mate) t += ' Можно вместе с блюдом ' + q(h.mate.x.r) + ' — температура та же.';
           }
           x.items.push({ r: r, text: t, at: finalAt, crit: true, latest: finalAt, fin: true, need: p.before || 0 });
-          if (h && h.next && T - h.j.rest - h.out >= 20) {
+          var wait = h ? T - h.j.rest - h.out : 0;
+          if (h && h.next && wait >= 20) {
+            if (wait >= LONG_WAIT) longWait = true;
             x.items.push({ r: r, at: h.out, soft: true,
               text: 'Достаньте из духовки и укутайте фольгой и полотенцем — духовка нужна для ' + ovenNames(h.next.map(function (j) { return j.x.r; })) + '.' +
-                (T - h.j.rest - h.out >= 60 ? ' Перед подачей прогрейте 10–15 минут, когда духовка освободится.' : '') });
+                (wait >= LONG_WAIT && reheatOk ? ' Перед подачей прогрейте 10–15 минут, когда духовка освободится.' : '') });
           }
         }
       }
@@ -1102,12 +1127,14 @@
     // 3) Выпечка 31-го: сначала самая срочная.
     var bakes = [];
     dish.forEach(function (x) {
-      if (x.flex) bakes.push({ x: x, b: x.p.bake, earliest: Math.max(nowAt, BAKE_FROM), latestEnd: x.serve - 30, main: true });
+      // выпечка к чаю (шарлотка) — испечь к застолью, за час остынет
+      if (x.flex) bakes.push({ x: x, b: x.p.bake, earliest: Math.max(nowAt, BAKE_FROM), latestEnd: x.p.toTea ? T : x.serve - 30, main: true });
       x.bakes.forEach(function (bk) { bakes.push({ x: x, b: bk.b, earliest: bk.earliest, latestEnd: bk.latestEnd }); });
     });
     bakes.sort(function (a, b) { return a.earliest - b.earliest || a.latestEnd - b.latestEnd; });
     bakes.forEach(function (bk) {
       var s = placeBake(busy, bk.earliest, bk.b.min), x = bk.x;
+      if (bk.earliest + bk.b.min > bk.latestEnd + LATE_GRACE) x.bakeIntr = true; // не успеть и в пустой духовке
       P.oven.push({ id: x.r.id, t: bk.b.t, t2: 0, from: s, to: s + bk.b.min });
       ovenCount++;
       if (bk.main) {
@@ -1120,6 +1147,7 @@
       }
     });
     if (ovenCount >= 2) P.notes.push('Духовка одна: блюда стоят в ней по очереди, а вместе (не больше двух) — только при одинаковой температуре. Время ниже это уже учитывает.');
+    if (longWait) P.notes.push('Горячих много для одной духовки: часть придётся приготовить заранее, и до застолья она будет ждать под фольгой больше часа. Лучше оставить 1–2 горячих блюда.');
 
     // 4) 31-го: что уже не успеть, что — «сейчас».
     dish.forEach(function (x) {
@@ -1129,18 +1157,21 @@
         x.items.forEach(function (it) { if (it.crit && (!worst || it.latest < worst.latest)) worst = it; });
         var late = x.ovenLate || (worst && worst.at > worst.latest + LATE_GRACE) || (worst && worst.latest < now - LATE_GRACE);
         if (late) {
-          var need = worst ? worst.need : 0, when = x.p.tea ? 'к чаю' : 'к ' + hhmm(T);
-          var byOven = (x.ovenLate || (worst && worst.busyOven)) && !(worst && worst.latest < now - LATE_GRACE && now + need > x.serve);
-          P.late.push({ r: x.r, text: byOven
-            ? 'Уже не успеть ' + when + ': духовка до застолья занята. Не беда — замените блюдо в меню или купите готовое.'
+          var intr = x.oven ? x.hotIntr : (x.ovenLate || (worst && worst.busyOven)) ? !!x.bakeIntr || !!(worst && worst.latest < now - LATE_GRACE) : true;
+          var need = x.oven ? x.hotNeed : worst ? worst.need : 0, when = x.when;
+          P.late.push({ r: x.r, intr: intr, text: !intr
+            ? 'Уже не успеть ' + when + ': ' + (x.ovenLate && !x.flex ? 'духовка в нужное время занята другими блюдами' : 'духовка до застолья занята') + '. Не беда — замените блюдо в меню или купите готовое.'
             : 'Уже не успеть ' + when + ': нужно около ' + durText(need) + '. Не беда — замените блюдо в меню или купите готовое.' });
           P.tea = P.tea.filter(function (t) { return t.x !== x; });
           return;
         }
         x.items.forEach(function (it) { if (it.at <= nowAt) { it.at = nowAt; it.now = true; } });
-        // «Достаньте курицу за час» уже не имеет смысла, если ставить в духовку тоже сейчас.
+        // прошедшая подготовка — «сейчас»; необязательную (opt) убираем, если final тоже сейчас; мало времени — short
         var fin = x.items.filter(function (it) { return it.fin; })[0];
-        if (fin) x.items = x.items.filter(function (it) { return !(it.soft && it.now && it.at >= fin.at); });
+        if (fin) {
+          x.items = x.items.filter(function (it) { return !(it.opt && it.now && it.at >= fin.at); });
+          x.items.forEach(function (it) { if (it.now && it.short && fin.at - it.at < it.shortIf) it.text = it.short; });
+        }
       }
       x.items.forEach(function (it) { P[31].push({ r: it.r, text: it.text, at: floor15(Math.max(0, it.at)), now: !!it.now }); });
     });
@@ -1148,13 +1179,6 @@
     if (P.over) { P[31] = []; P.notes = []; P.late = []; delete P.shop[31]; }
     PLAN_DAYS.forEach(function (d) { if (P.show.indexOf(d) < 0) P[d] = []; });
     P.tea = P.tea.map(function (t) { return { r: t.r, text: t.text }; });
-    // Блюда, которые уже не успеть, не занимают духовку: пересчитываем без них.
-    var lateIds = P.late.map(function (it) { return it.r.id; });
-    if (td === 31 && lateIds.length && skip.length < state.menu.length && lateIds.some(function (id) { return skip.indexOf(id) < 0; })) {
-      var P2 = planDays(skip.concat(lateIds));
-      P2.late = P.late.concat(P2.late.filter(function (it) { return lateIds.indexOf(it.r.id) < 0; }));
-      return P2;
-    }
     return P;
   }
   function baseCatOrder(r) { var c = baseCat(r); return c === 'drinks' ? 'trendy' : c; }
@@ -1169,13 +1193,16 @@
       (what ? '<span class="plan-what">' + what + '</span>' : '') + (text ? '<span class="plan-text">' + esc(text) + '</span>' : '') + '</li>';
   }
   function dishLink(r) { return '<a href="#r/' + r.id + '" data-src="plan">' + esc(r.title) + '</a>'; }
+  function tableChips() {
+    var t = tableHour();
+    return '<div class="chips" role="group" aria-label="Во сколько садитесь за стол"><span class="chips-label">За стол в:</span>' +
+      TABLE_HOURS.map(function (h) {
+        return '<button class="chip' + (h === t ? ' on' : '') + '" data-act="table-set" data-v="' + h + '" aria-pressed="' + (h === t) + '">' + h + ':00</button>';
+      }).join('') + '</div>';
+  }
   function planHtml() {
     var P = planDays(), t = tableHour(), td = P.phase.day;
-    var chips = TABLE_HOURS.map(function (h) {
-      return '<button class="chip' + (h === t ? ' on' : '') + '" data-act="table-set" data-v="' + h + '" aria-pressed="' + (h === t) + '">' + h + ':00</button>';
-    }).join('');
-    var html = '<section class="card plan-time"><div class="chips" role="group" aria-label="Во сколько садитесь за стол">' +
-      '<span class="chips-label">За стол в:</span>' + chips + '</div>' +
+    var html = '<section class="card plan-time">' + tableChips() +
       '<p class="note">Время 31 декабря — примерное, от часа застолья.</p></section>';
     if (td === 30 && P.moved) html += '<p class="notice notice-info" data-testid="plan-moved">29 декабря уже прошло — дела с него перенесены на сегодня. Всё ещё можно успеть.</p>';
     if (td === 31) html += '<p class="notice notice-info" data-testid="plan-today">' + (P.over ? 'Пора за стол — с праздником! Если что-то не успели, не беда: подайте позже.'
@@ -1224,7 +1251,8 @@
         '<p>' + (td === 31 ? 'Что ещё успеть сегодня — по часам' : td === 30 ? 'Что делать сегодня и завтра' : 'Что делать 29, 30 и 31 декабря') + ' — для блюд вашего меню.</p>' +
         '<a class="btn btn-secondary" href="#plan" data-src="menu">' + ICON.cal + 'Открыть план по дням</a></section>';
     }
-    if (!planOffered()) return '<section class="card plan-card" data-testid="plan-card"><h2>План готовки по дням</h2><p>' + esc(planClosedText()) + '</p></section>';
+    if (!planOffered()) return '<section class="card plan-card" data-testid="plan-card"><h2>План готовки по дням</h2><p>' + esc(planClosedText()) + '</p>' +
+      (planPhase().season === 'late' && tableHour() < TABLE_HOURS[TABLE_HOURS.length - 1] ? '<p><a href="#plan" data-src="menu">Садитесь за стол позже? Выберите час</a></p>' : '') + '</section>';
     if (!planAvailable()) return '';
     AN.once('plan_offer_shown', { source: 'menu' });
     return '<section class="card plan-card" data-testid="plan-card"><h2>План готовки по дням</h2>' +
@@ -1249,10 +1277,13 @@
     if (!planOpen()) {
       if (!planOffered()) {
         return '<h1 class="page-title">План готовки по дням</h1>' +
-          '<section class="card plan-card" data-testid="plan-closed"><p class="plan-offer">' + esc(planClosedText()) + '</p></section>' +
+          '<section class="card plan-card" data-testid="plan-closed"><p class="plan-offer">' + esc(planClosedText()) + '</p>' +
+          (planPhase().season === 'late' ? '<p class="note">Садитесь за стол позже? Выберите час — план пересчитается.</p>' + tableChips() : '') + '</section>' +
           '<div class="actions col"><a class="btn btn-outline" href="#menu">' + ICON.menu + 'Назад к меню</a></div>';
       }
       return '<h1 class="page-title">План готовки по дням</h1>' +
+        (planPhase().day === 31 ? '<section class="card plan-time" data-testid="plan-hour">' + tableChips() +
+          '<p class="note">Время сегодня считается от часа застолья.</p></section>' : '') +
         '<section class="card plan-card">' + (planWasForOld() ? '<p class="note" data-testid="plan-old">' + esc(PLAN_OLD) + '</p>' : '') +
         '<p class="plan-offer">' + esc(planOfferText()) + '</p>' +
         '<p class="note">В плане будут все ' + n + ' ' + plural(n, DISH) + ' вашего меню: что можно сделать заранее и что — в последний момент, с примерным временем.</p>' +
@@ -2233,8 +2264,11 @@
     'postcard': function (el) { openPostcard(el); },
     'plan-ad': function (el) { startPlanAd(el.getAttribute('data-src') || 'menu'); },
     'table-set': function (el) {
-      if (!meta.plan) return;
-      meta.plan.t = +el.getAttribute('data-v');
+      var h = +el.getAttribute('data-v');
+      if (TABLE_HOURS.indexOf(h) < 0) return;
+      // час до рекламы — «пустой» план без меню (31-го от часа зависит, предлагать ли план)
+      if (!meta.plan) meta.plan = { day: 0, menu: '', t: h };
+      meta.plan.t = h;
       save([K.plan]); rerender();
     },
     'intro-ok': function () {
